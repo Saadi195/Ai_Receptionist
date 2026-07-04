@@ -17,7 +17,7 @@ export default function Home() {
       {/* Header - Fixed to top, full width */}
       <header className="w-full flex justify-between items-center p-6 md:p-8 shrink-0 z-50">
         <h1 className="text-2xl md:text-3xl font-bold tracking-wide bg-gradient-to-r from-primary via-purple-300 to-white bg-clip-text text-transparent">
-          Aetheris AI
+          AI Receptionist
         </h1>
         <div className="flex gap-4 items-center">
           <Link href="/kitchen" className="text-sm md:text-base text-text-muted hover:text-white transition-colors">Kitchen</Link>
@@ -39,12 +39,12 @@ export default function Home() {
         <div className="shrink-0 flex flex-col items-center w-full pb-8 md:pb-12 gap-6 md:gap-8 text-center mt-auto">
           <div className="space-y-3">
             <p className="text-xs md:text-sm uppercase tracking-widest text-primary font-semibold">
-              {isRecording ? "Listening..." : "Aetheris Active"}
+              {isRecording ? "Listening..." : "AI Receptionist Active"}
             </p>
             <h2 className="text-xl md:text-2xl font-medium text-white leading-relaxed max-w-3xl px-4 transition-all h-[80px] md:h-[90px] flex items-center justify-center">
               {isRecording 
                 ? "I am listening... Please speak your order."
-                : "Assalam-o-Alaikum! Welcome to XYZ Restaurant. I'm your AI ordering assistant. You may place your order in Urdu, English or a mix of both. Press Start Ordering whenever you're ready."
+                : "Assalam-o-Alaikum! Welcome to Savour Foods. I'm your AI ordering assistant. You may place your order in Urdu, English or a mix of both. Press Start Ordering whenever you're ready."
               }
             </h2>
           </div>
