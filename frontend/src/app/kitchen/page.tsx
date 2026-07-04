@@ -5,7 +5,7 @@ export default function Kitchen() {
     <div className="min-h-screen bg-bg p-8 text-white">
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-4">
-          <Link href="/" className="text-2xl font-bold tracking-wide bg-gradient-to-r from-primary via-purple-300 to-white bg-clip-text text-transparent">Aetheris AI <span className="text-text-muted font-normal">| Kitchen Hub</span></Link>
+          <Link href="/" className="text-2xl font-bold tracking-wide bg-gradient-to-r from-primary via-purple-300 to-white bg-clip-text text-transparent">AI Receptionist <span className="text-text-muted font-normal">| Kitchen Hub</span></Link>
         </div>
         <div className="flex gap-8 text-sm font-medium">
           <span className="text-text-muted cursor-pointer hover:text-white">Live Stream</span>

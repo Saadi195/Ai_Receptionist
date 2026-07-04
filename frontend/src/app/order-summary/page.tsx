@@ -4,7 +4,7 @@ export default function OrderSummary() {
   return (
     <div className="min-h-screen bg-bg p-8 text-white flex flex-col items-center">
       <div className="w-full max-w-4xl flex justify-between items-center mb-12">
-        <Link href="/" className="text-2xl font-bold tracking-wide bg-gradient-to-r from-primary via-purple-300 to-white bg-clip-text text-transparent">Aetheris AI</Link>
+        <Link href="/" className="text-2xl font-bold tracking-wide bg-gradient-to-r from-primary via-purple-300 to-white bg-clip-text text-transparent">AI Receptionist</Link>
         <div className="w-10 h-10 rounded-full bg-primary bg-opacity-20 flex items-center justify-center border border-primary border-opacity-50 shadow-[0_0_15px_rgba(138,43,226,0.3)]">
           <span className="w-4 h-4 rounded-full bg-primary animate-pulse"></span>
         </div>
