@@ -1,0 +1,1213 @@
+[
+  {
+    "condition": "quiet",
+    "sample": "01",
+    "model": "groq_whisper_turbo",
+    "transcript": " ھrdu-English mixed.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken karahi"
+    ],
+    "latency_ms": 1606,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "01",
+    "model": "deepgram_nova3_multi",
+    "transcript": "एक chicken Karahi देना.",
+    "passed": true,
+    "found_terms": [
+      "chicken karahi"
+    ],
+    "missing_terms": [],
+    "latency_ms": 2593,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "01",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ایک چکن کڑاہی دینا",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken karahi"
+    ],
+    "latency_ms": 2791,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "02",
+    "model": "groq_whisper_turbo",
+    "transcript": " Two beef burgers without onion.",
+    "passed": true,
+    "found_terms": [
+      "beef burger"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1096,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "02",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Two Beef Burger, Beef Burger, Burger,",
+    "passed": true,
+    "found_terms": [
+      "beef burger"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3347,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "02",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ٹو پیف برگرز بنانین کے",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "beef burger"
+    ],
+    "latency_ms": 3625,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "03",
+    "model": "groq_whisper_turbo",
+    "transcript": " Mugje Zdeera Rice चाहिए और एक लान.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice",
+      "naan"
+    ],
+    "latency_ms": 1696,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "03",
+    "model": "deepgram_nova3_multi",
+    "transcript": "मुझे Zeera Rice चाहिए और एक Naan.",
+    "passed": true,
+    "found_terms": [
+      "zeera rice",
+      "naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3612,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "03",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "مجھے زیرہ رائز چاہیے اور ایک نان",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice",
+      "naan"
+    ],
+    "latency_ms": 4209,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "04",
+    "model": "groq_whisper_turbo",
+    "transcript": " Bhaai, One Mutton Karahi, Urti, Non, Please.",
+    "passed": false,
+    "found_terms": [
+      "mutton karahi"
+    ],
+    "missing_terms": [
+      "naan"
+    ],
+    "latency_ms": 1444,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "04",
+    "model": "deepgram_nova3_multi",
+    "transcript": "भाई, one Mutton Karahi और तीन Naan, please.",
+    "passed": true,
+    "found_terms": [
+      "mutton karahi",
+      "naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4037,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "04",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "بھائی ون مٹن کڑاہی اور تین نان پلیز",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi",
+      "naan"
+    ],
+    "latency_ms": 4060,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "05",
+    "model": "groq_whisper_turbo",
+    "transcript": " Chicken Biryani Extra Raita",
+    "passed": true,
+    "found_terms": [
+      "chicken biryani"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1398,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "05",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Chicken Biryani extra रायता.",
+    "passed": true,
+    "found_terms": [
+      "chicken biryani"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4754,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "05",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "چکن بریانی ایکسٹرا رائے تھا",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken biryani"
+    ],
+    "latency_ms": 4090,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "06",
+    "model": "groq_whisper_turbo",
+    "transcript": " Ek sýkabab og roti",
+    "passed": false,
+    "found_terms": [
+      "roti"
+    ],
+    "missing_terms": [
+      "seekh kebab"
+    ],
+    "latency_ms": 1512,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "06",
+    "model": "deepgram_nova3_multi",
+    "transcript": "एक Seekh Kebab और दो Roti.",
+    "passed": true,
+    "found_terms": [
+      "seekh kebab",
+      "roti"
+    ],
+    "missing_terms": [],
+    "latency_ms": 5621,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "06",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ایک سی کباب اردو روٹی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "seekh kebab",
+      "roti"
+    ],
+    "latency_ms": 6256,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "07",
+    "model": "groq_whisper_turbo",
+    "transcript": " Mango Shake or French fries",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1447,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "07",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Mango shake or french fries?",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4556,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "07",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "میگو شیک اور فرینچ رائز",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mango shake"
+    ],
+    "latency_ms": 4249,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "08",
+    "model": "groq_whisper_turbo",
+    "transcript": " Dal Makhni medium spicy",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "dal makhani"
+    ],
+    "latency_ms": 1253,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "08",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Dal Makhani medium spicy.",
+    "passed": true,
+    "found_terms": [
+      "dal makhani"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4559,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "08",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "دال وکھنی میڈیم سپائسی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "dal makhani"
+    ],
+    "latency_ms": 4440,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "09",
+    "model": "groq_whisper_turbo",
+    "transcript": " Alugost ori garlignan.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "garlic naan"
+    ],
+    "latency_ms": 1327,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "09",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Alu ghost और एक garlic Naan.",
+    "passed": true,
+    "found_terms": [
+      "garlic naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4488,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "09",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "الو گوشت اور ایک گارلک نان",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "garlic naan"
+    ],
+    "latency_ms": 11133,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "10",
+    "model": "groq_whisper_turbo",
+    "transcript": " 2 chicken burgers, no cheese or Pepsi.",
+    "passed": true,
+    "found_terms": [
+      "chicken burger",
+      "pepsi"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1533,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "10",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Two chicken burgers, no cheese, or Pepsi.",
+    "passed": true,
+    "found_terms": [
+      "chicken burger",
+      "pepsi"
+    ],
+    "missing_terms": [],
+    "latency_ms": 5071,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "10",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ٹو چکن برگرز نو چیز اور پیپسی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken burger",
+      "pepsi"
+    ],
+    "latency_ms": 4170,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "11",
+    "model": "groq_whisper_turbo",
+    "transcript": " Nihari, Ek-Serving, Orðoroti",
+    "passed": true,
+    "found_terms": [
+      "nihari",
+      "roti"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1619,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "11",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Nihari, egg serving, और दो Roti.",
+    "passed": true,
+    "found_terms": [
+      "nihari",
+      "roti"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3162,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "11",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "نہاری ایک سرونگ اردو روٹی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "nihari",
+      "roti"
+    ],
+    "latency_ms": 3463,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "12",
+    "model": "groq_whisper_turbo",
+    "transcript": " Zira Rice, 2 plates",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice"
+    ],
+    "latency_ms": 1785,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "12",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Zeera Rice Dopplates",
+    "passed": true,
+    "found_terms": [
+      "zeera rice"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3208,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "12",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "زیرا رائس دو پلیٹس",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice"
+    ],
+    "latency_ms": 3855,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "13",
+    "model": "groq_whisper_turbo",
+    "transcript": " Eik chikkin birjani orðo non.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken biryani",
+      "naan"
+    ],
+    "latency_ms": 1533,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "13",
+    "model": "deepgram_nova3_multi",
+    "transcript": "एक Chicken Biryani और दो Naan.",
+    "passed": true,
+    "found_terms": [
+      "chicken biryani",
+      "naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 2891,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "13",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ایک چکن بریانی اوردو نان",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken biryani",
+      "naan"
+    ],
+    "latency_ms": 7517,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "14",
+    "model": "groq_whisper_turbo",
+    "transcript": " Muten Biryani Half Portion Bina Mirch",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi"
+    ],
+    "latency_ms": 1624,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "14",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Mutton Biryani, half portion beanamirsch.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi"
+    ],
+    "latency_ms": 3621,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "14",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "مٹن بریانی ہاف پورشن بنا مرچ",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi"
+    ],
+    "latency_ms": 2920,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "15",
+    "model": "groq_whisper_turbo",
+    "transcript": " Mango Shake, Bin Ais",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1452,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "15",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Mango Shake Be Nice.",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3147,
+    "denoised": false
+  },
+  {
+    "condition": "quiet",
+    "sample": "15",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "مینگو شیخ بن عیس",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mango shake"
+    ],
+    "latency_ms": 2702,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "01",
+    "model": "groq_whisper_turbo",
+    "transcript": " ھrdu-English mixed.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken karahi"
+    ],
+    "latency_ms": 1491,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "01",
+    "model": "deepgram_nova3_multi",
+    "transcript": "एक chicken Karahi देना.",
+    "passed": true,
+    "found_terms": [
+      "chicken karahi"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3883,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "01",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ایک چکن کڑاہی دینا",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken karahi"
+    ],
+    "latency_ms": 4731,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "02",
+    "model": "groq_whisper_turbo",
+    "transcript": " Two beef burgers without onion.",
+    "passed": true,
+    "found_terms": [
+      "beef burger"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1421,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "02",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Two Beef Burger, Beef Burger, Burger,",
+    "passed": true,
+    "found_terms": [
+      "beef burger"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3336,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "02",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ٹو پیف برگرز بنانین کے",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "beef burger"
+    ],
+    "latency_ms": 3594,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "03",
+    "model": "groq_whisper_turbo",
+    "transcript": " Mujhe Zeera Rice चाहिएं, और एक लान.",
+    "passed": false,
+    "found_terms": [
+      "zeera rice"
+    ],
+    "missing_terms": [
+      "naan"
+    ],
+    "latency_ms": 1825,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "03",
+    "model": "deepgram_nova3_multi",
+    "transcript": "मुझे Zeera Rice चाहिए और एक Naan.",
+    "passed": true,
+    "found_terms": [
+      "zeera rice",
+      "naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4019,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "03",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "مجھے زیرہ رائز چاہیے اور ایک نان",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice",
+      "naan"
+    ],
+    "latency_ms": 3867,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "04",
+    "model": "groq_whisper_turbo",
+    "transcript": " Bhaai, One Mutton Karahi, Urti, Non, Please.",
+    "passed": false,
+    "found_terms": [
+      "mutton karahi"
+    ],
+    "missing_terms": [
+      "naan"
+    ],
+    "latency_ms": 1404,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "04",
+    "model": "deepgram_nova3_multi",
+    "transcript": "भाई, one Mutton Karahi और तीन Naan, please.",
+    "passed": true,
+    "found_terms": [
+      "mutton karahi",
+      "naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4412,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "04",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "بھائی ون مٹن کڑاہی اور تین نان پلیز",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi",
+      "naan"
+    ],
+    "latency_ms": 5399,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "05",
+    "model": "groq_whisper_turbo",
+    "transcript": " Chicken Biryani Extra Raita",
+    "passed": true,
+    "found_terms": [
+      "chicken biryani"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1521,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "05",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Chicken Biryani extra रायता.",
+    "passed": true,
+    "found_terms": [
+      "chicken biryani"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4293,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "05",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "چکن بریانی ایکسٹرا رائے تھا",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken biryani"
+    ],
+    "latency_ms": 4139,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "06",
+    "model": "groq_whisper_turbo",
+    "transcript": " Ek sýkabab og roti",
+    "passed": false,
+    "found_terms": [
+      "roti"
+    ],
+    "missing_terms": [
+      "seekh kebab"
+    ],
+    "latency_ms": 1529,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "06",
+    "model": "deepgram_nova3_multi",
+    "transcript": "एक Seekh Kebab और दो Roti.",
+    "passed": true,
+    "found_terms": [
+      "seekh kebab",
+      "roti"
+    ],
+    "missing_terms": [],
+    "latency_ms": 6425,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "06",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ایک سی کباب اردو روٹی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "seekh kebab",
+      "roti"
+    ],
+    "latency_ms": 3404,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "07",
+    "model": "groq_whisper_turbo",
+    "transcript": " Mango Shake or French fries",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1287,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "07",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Mango shake or french fries?",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3378,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "07",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "میگو شیک اور فرینچ رائز",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mango shake"
+    ],
+    "latency_ms": 3313,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "08",
+    "model": "groq_whisper_turbo",
+    "transcript": " Dal Makhni medium spicy",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "dal makhani"
+    ],
+    "latency_ms": 1648,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "08",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Dal Makhani medium spicy.",
+    "passed": true,
+    "found_terms": [
+      "dal makhani"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3275,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "08",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "دال وکھنی میڈیم سپائسی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "dal makhani"
+    ],
+    "latency_ms": 6060,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "09",
+    "model": "groq_whisper_turbo",
+    "transcript": " Alugost ori garlignan.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "garlic naan"
+    ],
+    "latency_ms": 1301,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "09",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Alu ghost और एक garlic Naan.",
+    "passed": true,
+    "found_terms": [
+      "garlic naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4358,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "09",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "الو گوشت اور ایک گارلک نان",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "garlic naan"
+    ],
+    "latency_ms": 4526,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "10",
+    "model": "groq_whisper_turbo",
+    "transcript": " 2 chicken burgers, no cheese or Pepsi.",
+    "passed": true,
+    "found_terms": [
+      "chicken burger",
+      "pepsi"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1547,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "10",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Two chicken burgers, no cheese, or Pepsi.",
+    "passed": true,
+    "found_terms": [
+      "chicken burger",
+      "pepsi"
+    ],
+    "missing_terms": [],
+    "latency_ms": 4700,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "10",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ٹو چکن برگرز نو چیز اور پیپسی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken burger",
+      "pepsi"
+    ],
+    "latency_ms": 11178,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "11",
+    "model": "groq_whisper_turbo",
+    "transcript": " Nihari, Ek-Serving, Orðoroti",
+    "passed": true,
+    "found_terms": [
+      "nihari",
+      "roti"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1213,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "11",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Nihari, egg serving, और दो Roti.",
+    "passed": true,
+    "found_terms": [
+      "nihari",
+      "roti"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3047,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "11",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "نہاری ایک سرونگ اردو روٹی",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "nihari",
+      "roti"
+    ],
+    "latency_ms": 3362,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "12",
+    "model": "groq_whisper_turbo",
+    "transcript": " Zira Rice, 2 plates",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice"
+    ],
+    "latency_ms": 1547,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "12",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Zeera Rice Dopplates",
+    "passed": true,
+    "found_terms": [
+      "zeera rice"
+    ],
+    "missing_terms": [],
+    "latency_ms": 2605,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "12",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "زیرا رائس دو پلیٹس",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "zeera rice"
+    ],
+    "latency_ms": 3587,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "13",
+    "model": "groq_whisper_turbo",
+    "transcript": " Eik chikkin birjani orðo non.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken biryani",
+      "naan"
+    ],
+    "latency_ms": 1528,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "13",
+    "model": "deepgram_nova3_multi",
+    "transcript": "एक Chicken Biryani और दो Naan.",
+    "passed": true,
+    "found_terms": [
+      "chicken biryani",
+      "naan"
+    ],
+    "missing_terms": [],
+    "latency_ms": 2575,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "13",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "ایک چکن بریانی اوردو نان",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "chicken biryani",
+      "naan"
+    ],
+    "latency_ms": 3303,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "14",
+    "model": "groq_whisper_turbo",
+    "transcript": " Muten Biryani Half Portion Bina Mirch",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi"
+    ],
+    "latency_ms": 1449,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "14",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Mutton Biryani, half portion beanamirsch.",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi"
+    ],
+    "latency_ms": 4739,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "14",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "مٹن بریانی ہاف پورشن بنا مرچ",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mutton karahi"
+    ],
+    "latency_ms": 5349,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "15",
+    "model": "groq_whisper_turbo",
+    "transcript": " Mango Shake, Bin Ais",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 1317,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "15",
+    "model": "deepgram_nova3_multi",
+    "transcript": "Mango Shake Be Nice.",
+    "passed": true,
+    "found_terms": [
+      "mango shake"
+    ],
+    "missing_terms": [],
+    "latency_ms": 3289,
+    "denoised": false
+  },
+  {
+    "condition": "noisy",
+    "sample": "15",
+    "model": "deepgram_nova3_urdu",
+    "transcript": "مینگو شیخ بن عیس",
+    "passed": false,
+    "found_terms": [],
+    "missing_terms": [
+      "mango shake"
+    ],
+    "latency_ms": 2888,
+    "denoised": false
+  }
+]
