@@ -225,12 +225,30 @@ class ConversationManager:
 
         # Rate-limit guard removed for < 2s conversational turnaround
         try:
-            completion = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=0.2,
-                max_tokens=600,  # Slightly higher for multi-item responses
-            )
+            try:
+                completion = self.groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=600,
+                )
+            except Exception as e1:
+                print(f"[GROQ FALLBACK] 70B rate limited ({e1}), falling back to llama-3.1-8b-instant...", flush=True)
+                try:
+                    completion = self.groq_client.chat.completions.create(
+                        model="llama-3.1-8b-instant",
+                        messages=messages,
+                        temperature=0.2,
+                        max_tokens=600,
+                    )
+                except Exception as e2:
+                    print(f"[GROQ FALLBACK] 8B-instant rate limited ({e2}), falling back to llama3-8b-8192...", flush=True)
+                    completion = self.groq_client.chat.completions.create(
+                        model="llama3-8b-8192",
+                        messages=messages,
+                        temperature=0.2,
+                        max_tokens=600,
+                    )
             raw_content = completion.choices[0].message.content or ""
             cleaned_json = self._strip_code_fences(raw_content)
 
