@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Orb from "../components/Orb";
 import type { OrbState } from "../components/Orb";
 import { useMicVAD } from "@ricky0123/vad-react";
@@ -31,6 +32,8 @@ interface WsStateUpdate {
   current_order?: OrderItem[];
   order_total?: number;
   response_text?: string;
+  action?: string;
+  session_id?: string;
   text?: string;
   message?: string;
 }
@@ -74,6 +77,8 @@ function float32ToInt16(float32: Float32Array): Int16Array {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Home() {
+  const router = useRouter();
+
   // ── Session & connection state ───────────────────────────────────────────
   const [sessionActive, setSessionActive] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -90,6 +95,7 @@ export default function Home() {
   // ── Transcript ───────────────────────────────────────────────────────────
   const [interimTranscript, setInterimTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
+  const [conversationLog, setConversationLog] = useState<Array<{ sender: "user" | "ai"; text: string }>>([]);
   const transcriptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
@@ -97,6 +103,7 @@ export default function Home() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const isSpeakingRef = useRef(false);
+  const speechStartTimeRef = useRef(0);
   const sessionActiveRef = useRef(false); // mirror for callbacks
 
   // Keep sessionActiveRef in sync
@@ -135,6 +142,7 @@ export default function Home() {
 
       currentSourceRef.current = source;
       isSpeakingRef.current = true;
+      speechStartTimeRef.current = Date.now();
       setOrbState("speaking");
 
       source.onended = () => {
@@ -183,6 +191,7 @@ export default function Home() {
 
           if (msg.type === "transcript" && msg.text) {
             setInterimTranscript(msg.text);
+            setConversationLog((prev) => [...prev, { sender: "user", text: msg.text! }]);
             // Auto-clear after 3s
             if (transcriptTimerRef.current) clearTimeout(transcriptTimerRef.current);
             transcriptTimerRef.current = setTimeout(() => setInterimTranscript(""), 3000);
@@ -192,20 +201,47 @@ export default function Home() {
             if (msg.state) setBackendState(msg.state);
             if (msg.current_order) setCurrentOrder(msg.current_order);
             if (typeof msg.order_total === "number") setOrderTotal(msg.order_total);
-            if (msg.response_text) setAiResponse(msg.response_text);
+            if (msg.response_text) {
+              setAiResponse(msg.response_text);
+              setConversationLog((prev) => [...prev, { sender: "ai", text: msg.response_text! }]);
+            }
 
-            // Session complete → reset after short delay
-            if (msg.state === "SLEEPING" && sessionActiveRef.current) {
-              setTimeout(() => {
-                stopCurrentAudio();
-                setSessionActive(false);
-                setOrbState("sleeping");
-                setCurrentOrder([]);
-                setOrderTotal(0);
-                setBackendState("SLEEPING");
-                setInterimTranscript("");
-                setAiResponse("Order complete! Naya order dene ke liye dobara Start karein.");
-              }, 3500);
+            // Order confirmed or session complete → stop microphone and navigate to order summary
+            if (
+              (msg.state === "ORDER_CONFIRM" || msg.action === "send_to_kitchen" || msg.state === "SLEEPING") &&
+              sessionActiveRef.current
+            ) {
+              if (typeof window !== "undefined") {
+                const orderNum = (msg.session_id ?? Math.random().toString(36).substring(2, 8)).slice(-6).toUpperCase();
+                localStorage.setItem(
+                  "latest_order",
+                  JSON.stringify({
+                    order_number: orderNum,
+                    items: msg.current_order ?? currentOrder,
+                    total: msg.order_total ?? orderTotal,
+                    date: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                  })
+                );
+              }
+
+              // Wait for AI to finish speaking confirmation message before navigating
+              const startCheckTime = Date.now();
+              const checkInterval = setInterval(() => {
+                const elapsed = Date.now() - startCheckTime;
+                // Wait at least 3.5 seconds for speech audio to arrive and start playing.
+                // Then navigate once AI finishes speaking (or after 14 seconds fallback).
+                if ((elapsed > 3500 && !isSpeakingRef.current) || elapsed > 14000) {
+                  clearInterval(checkInterval);
+                  stopCurrentAudio();
+                  setSessionActive(false);
+                  setOrbState("sleeping");
+                  if (wsRef.current) {
+                    wsRef.current.close();
+                    wsRef.current = null;
+                  }
+                  router.push("/order-summary");
+                }
+              }, 300);
             }
           }
 
@@ -246,11 +282,25 @@ export default function Home() {
   const vad = useMicVAD({
     startOnLoad: false, // do not activate until startSession()
 
+    additionalAudioConstraints: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+
     onSpeechStart: () => {
+      console.log("SPEECH START FIRED — VAD is detecting voice");
+      console.log("wsRef current:", wsRef.current?.readyState);
+      console.log("sessionActive:", sessionActiveRef.current);
       if (!sessionActiveRef.current) return;
 
       // If AI is mid-speech, interrupt it
       if (isSpeakingRef.current) {
+        // Prevent self-interruption from speaker echo or room acoustics in the first 1200ms of AI speech
+        if (Date.now() - speechStartTimeRef.current < 1200) {
+          console.debug("[VAD] Suppressing echo/self-interruption during initial AI playback");
+          return;
+        }
         stopCurrentAudio();
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: "interruption" }));
@@ -261,6 +311,8 @@ export default function Home() {
     },
 
     onSpeechEnd: (audio: Float32Array) => {
+      console.log("SPEECH END FIRED — audio length:", audio.length);
+      console.log("wsRef readyState:", wsRef.current?.readyState);
       if (!sessionActiveRef.current) return;
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
@@ -270,21 +322,26 @@ export default function Home() {
     },
 
     onVADMisfire: () => {
-      // Too short to be real speech — ignore
-      console.debug("[VAD] misfire — too short");
+      console.log("VAD MISFIRE — speech too short, discarded");
     },
 
     // Static asset paths — files must exist in /public
-    // vad-web 0.0.36 ships silero_vad_legacy.onnx (not silero_vad.onnx)
+    modelURL: "/silero_vad_v5.onnx",
     workletURL: "/vad.worklet.bundle.min.js",
-    modelURL: "/silero_vad_legacy.onnx",
+    model: "v5",
+    baseAssetPath: "/",
+    onnxWASMBasePath: "/",
+    ortConfig: (ort: any) => {
+      ort.env.wasm.wasmPaths = "/";
+      ort.env.wasm.numThreads = 1;
+    },
 
-    // Tuned for restaurant noise environment (noisy kitchen background)
-    positiveSpeechThreshold: 0.8,  // Higher = fewer false positives from clatter
-    negativeSpeechThreshold: 0.7,  // Hysteresis gap
-    minSpeechFrames: 3,            // Min frames before utterance is confirmed
-    preSpeechPadFrames: 5,         // Capture frames before VAD triggered
-    redemptionFrames: 10,          // Frames of silence before speech segment ends
+    // Tuned for low-latency conversational turnarounds (< 2 seconds)
+    positiveSpeechThreshold: 0.4,
+    negativeSpeechThreshold: 0.25, // ~0.15 lower than positive
+    minSpeechMs: 150,
+    preSpeechPadMs: 200,
+    redemptionMs: 350,
   });
 
   // ─── Session start ─────────────────────────────────────────────────────
@@ -294,6 +351,19 @@ export default function Home() {
     setConnectionError(null);
     setInterimTranscript("");
     setAiResponse("Connecting to AI Receptionist...");
+    setConversationLog([]);
+
+    // Initialize and unlock AudioContext during user click gesture to satisfy browser autoplay policy
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = new AudioContext();
+      }
+      if (audioCtxRef.current.state === "suspended") {
+        await audioCtxRef.current.resume();
+      }
+    } catch (e) {
+      console.warn("[AudioContext] Failed to unlock audio on click:", e);
+    }
 
     try {
       await connectWebSocket();
@@ -317,7 +387,13 @@ export default function Home() {
   // ─── Session stop ──────────────────────────────────────────────────────
 
   const stopSession = useCallback(() => {
-    vad.pause();
+    try {
+      if (vad && !vad.errored && !vad.loading) {
+        vad.pause();
+      }
+    } catch (e) {
+      console.warn("[VAD] pause ignored:", e);
+    }
     stopCurrentAudio();
     wsRef.current?.close();
     wsRef.current = null;
@@ -328,6 +404,7 @@ export default function Home() {
     setOrderTotal(0);
     setInterimTranscript("");
     setAiResponse("");
+    setConversationLog([]);
     if (transcriptTimerRef.current) clearTimeout(transcriptTimerRef.current);
   }, [vad, stopCurrentAudio]);
 
@@ -335,8 +412,15 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
-      stopSession();
-      audioCtxRef.current?.close();
+      stopCurrentAudio();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        audioCtxRef.current.close().catch(() => {});
+      }
+      if (transcriptTimerRef.current) clearTimeout(transcriptTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -629,6 +713,84 @@ export default function Home() {
               ■ End Session
             </button>
           )}
+        </div>
+
+        {/* ── Live Conversation Transcript Box (Debug / Mic Check) ── */}
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 640,
+            background: "rgba(20, 16, 30, 0.9)",
+            borderRadius: "16px",
+            border: "1px solid rgba(138,43,226,0.35)",
+            padding: "1.25rem",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.75rem",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(138,43,226,0.2)", paddingBottom: "0.5rem" }}>
+            <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#c084fc", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              🎙️ Live Conversation Box (Mic Check)
+            </span>
+            <span style={{ fontSize: "0.75rem", color: "#a09eb0" }}>
+              {conversationLog.length} messages
+            </span>
+          </div>
+          <div
+            style={{
+              maxHeight: "220px",
+              minHeight: "100px",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.6rem",
+              paddingRight: "4px",
+            }}
+          >
+            {conversationLog.length === 0 ? (
+              <p style={{ color: "#6d6a7a", fontSize: "0.85rem", fontStyle: "italic", textAlign: "center", margin: "auto 0" }}>
+                Speak into your microphone... Your voice and the AI replies will appear here!
+              </p>
+            ) : (
+              conversationLog.map((entry, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: entry.sender === "user" ? "flex-end" : "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.7rem",
+                      color: entry.sender === "user" ? "#60a5fa" : "#4ade80",
+                      marginBottom: "2px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {entry.sender === "user" ? "You (Microphone)" : "AI Receptionist"}
+                  </span>
+                  <div
+                    style={{
+                      background: entry.sender === "user" ? "rgba(59,130,246,0.15)" : "rgba(34,197,94,0.12)",
+                      border: `1px solid ${entry.sender === "user" ? "rgba(59,130,246,0.3)" : "rgba(34,197,94,0.25)"}`,
+                      padding: "8px 12px",
+                      borderRadius: "10px",
+                      color: "#e2e0f0",
+                      fontSize: "0.875rem",
+                      maxWidth: "85%",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {entry.text}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
 
         {/* ── Two-column: Order card (only when items exist) ── */}

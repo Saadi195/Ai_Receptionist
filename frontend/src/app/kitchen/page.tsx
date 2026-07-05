@@ -70,7 +70,7 @@ function OrderCard({
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#c084fc", letterSpacing: "0.05em" }}>
-          #{shortId(order.id)}
+          #{shortId(order.session_id || order.id)}
         </span>
         <span style={{ fontSize: "0.75rem", color: "#6d6a7a" }}>{formatTime(order.created_at)}</span>
       </div>
@@ -300,11 +300,11 @@ export default function KitchenDisplay() {
               🔵 Preparing: {preparingOrders.length}
             </div>
           </div>
-          <Link href="/" style={{ fontSize: "0.8rem", color: "#a09eb0", textDecoration: "none" }}
+          <a href="/" style={{ fontSize: "0.8rem", color: "#a09eb0", textDecoration: "none" }}
             onMouseEnter={e => (e.currentTarget.style.color = "#fff")}
             onMouseLeave={e => (e.currentTarget.style.color = "#a09eb0")}>
             ← Back to Ordering
-          </Link>
+          </a>
         </div>
       </header>
 

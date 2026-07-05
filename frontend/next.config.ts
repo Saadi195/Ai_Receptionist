@@ -11,6 +11,13 @@ const nextConfig: NextConfig = {
       ...config.experiments,
       asyncWebAssembly: true,
     };
+    // Suppress webpack warnings from onnxruntime-web dynamic requires
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings ?? []),
+      { module: /onnxruntime-web/ },
+      { file: /onnxruntime-web/ },
+      { message: /Critical dependency: require function/ },
+    ];
     return config;
   },
   turbopack: {},

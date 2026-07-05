@@ -70,8 +70,11 @@ STRICT RULES — ALWAYS FOLLOW:
    "Main sirf orders le sakta hoon. Kya aap kuch order karna chahenge?" and stay in current state.
 7. Out of stock: say "Sorry, [item] abhi available nahi hai. Kya aur kuch chahiye?"
 8. Item not on menu: say "Sorry, yeh item hamare menu mein nahi hai."
-9. On ORDER_CONFIRM: read back complete order with individual prices and total, \
-   then say "Apna ticket aur bill POS se hasil karein. Shukriya!" and set action="send_to_kitchen".
+9. When transitioning to ORDER_CONFIRM (or confirming order): YOU MUST read back the COMPLETE order \
+   with item names, quantities, individual prices, and order_total! For example: "Aap ka order confirm kar diya hai. \
+   Ek Daal Makhani 250 PKR, Ek Pepsi 80 PKR. Aap ka total bill 330 PKR hai. Apni receipt POS machine se collect kar lein. \
+   Order karne ka shukriya!" And set next_state="ORDER_CONFIRM" and action="send_to_kitchen". \
+   NEVER just say "Aap ka order confirm hai" without listing all items and total!
 
 MULTI-ITEM RULES:
 10. Customer may name multiple items in one utterance: "ek karahi aur do naan"
@@ -220,9 +223,7 @@ class ConversationManager:
         messages.extend(self.history[-20:])
         messages.append({"role": "user", "content": user_input_clean})
 
-        # Rate-limit guard for Groq free tier (30 RPM)
-        time.sleep(2)
-
+        # Rate-limit guard removed for < 2s conversational turnaround
         try:
             completion = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -269,7 +270,9 @@ class ConversationManager:
                 self.history = self.history[-20:]
 
             # Handle order confirmed → write to Supabase then reset
-            if self.state == "ORDER_CONFIRM" and action == "send_to_kitchen":
+            if self.state == "ORDER_CONFIRM" or action == "send_to_kitchen":
+                action = "send_to_kitchen"
+                self.state = "ORDER_CONFIRM"
                 try:
                     db = get_supabase()
                     db.table("orders").insert({
@@ -280,6 +283,19 @@ class ConversationManager:
                     }).execute()
                 except Exception as e:
                     print(f"[ERROR] Failed to write order to Supabase: {e}")
+
+                # Ensure complete confirmation script is read back with item details and total
+                items_list = []
+                for item in self.current_order:
+                    qty = item.get("qty", 1)
+                    name = item.get("name", "item")
+                    items_list.append(f"{qty} {name}")
+                items_str = ", ".join(items_list) if items_list else "aap ka order"
+                response_text = (
+                    f"Aap ka order confirm kar diya hai: {items_str}. "
+                    f"Aap ka total hua hai {self.order_total} PKR. "
+                    f"Apni receipt POS machine se collect kar lein. Order karne ka shukriya!"
+                )
 
                 final_response = {
                     "response_text": response_text,

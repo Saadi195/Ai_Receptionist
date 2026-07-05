@@ -20,7 +20,7 @@ def generate_speech(text: str) -> Optional[bytes]:
         print("[ERROR] ELEVENLABS_API_KEY not set in environment.")
         return None
 
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
     model_id = os.getenv("ELEVENLABS_MODEL", "eleven_flash_v2_5")
 
     try:
