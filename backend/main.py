@@ -314,6 +314,25 @@ async def voice_websocket(websocket: WebSocket):
         except Exception as e:
             print(f"[Transcript processing error]: {e}")
 
+    async def send_initial_greeting():
+        greeting_text = "Assalam-o-Alaikum! Main Savour Foods ka AI receptionist hoon. Main aapki kaise madad kar sakta hoon?"
+        conv_manager.state = "TAKING_ORDER"
+        conv_manager.history.append({"role": "assistant", "content": greeting_text})
+        try:
+            await websocket.send_json({
+                "type": "state_update",
+                "state": conv_manager.state,
+                "current_order": [],
+                "order_total": 0,
+                "response_text": greeting_text,
+            })
+            audio_bytes = await asyncio.to_thread(generate_speech, greeting_text)
+            if audio_bytes and not interrupt_flag.is_set():
+                await websocket.send_bytes(audio_bytes)
+        except Exception as e:
+            print(f"[Initial greeting error]: {e}")
+
+    asyncio.create_task(send_initial_greeting())
     t1 = asyncio.create_task(receive_from_browser())
     t2 = asyncio.create_task(process_transcripts_and_respond())
 

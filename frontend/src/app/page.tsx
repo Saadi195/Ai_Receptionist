@@ -54,7 +54,7 @@ const STATE_LABELS: Record<ConversationState, string> = {
 };
 
 const IDLE_STATUS_TEXT =
-  '"Hello AI Receptionist" bol kar order shuru karein';
+  "Start Ordering button press karein";
 
 // ─── Audio helpers ────────────────────────────────────────────────────────────
 
@@ -293,14 +293,13 @@ export default function Home() {
     setIsConnecting(true);
     setConnectionError(null);
     setInterimTranscript("");
-    setAiResponse("");
+    setAiResponse("Connecting to AI Receptionist...");
 
     try {
       await connectWebSocket();
       vad.start();
       setSessionActive(true);
       setOrbState("listening");
-      setAiResponse('"Hello AI Receptionist" bol kar order shuru karein');
     } catch (err) {
       let message = "Session start karne mein masla. Dobara try karein.";
       if (err instanceof DOMException && err.name === "NotAllowedError") {
