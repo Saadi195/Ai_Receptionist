@@ -34,5 +34,10 @@ node_modules/
 # Build
 dist/
 build/
-
 backend/venv/
+
+# Audio Test Files
+backend/tests/audio_samples/*.wav
+backend/tests/audio_samples/*.m4a
+backend/tests/audio_samples/*.mp3
+backend/tests/results/

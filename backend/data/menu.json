@@ -1,0 +1,166 @@
+{
+  "restaurant_name": "Savour Foods",
+  "currency": "PKR",
+  "version": "1.0",
+  "last_updated": "2026-07-05",
+  "categories": [
+    {
+      "id": "cat_001",
+      "name": "Main Course",
+      "items": [
+        {
+          "id": "item_001",
+          "canonical_name": "Chicken Karahi",
+          "urdu_name": "چکن کڑاہی",
+          "price": 850,
+          "available": true,
+          "aliases": ["karahi", "chicken karahi", "karahi chicken", "murgh karahi"],
+          "modifications": [
+            {"id": "mod_001", "name": "No Spice", "urdu": "bina mirch", "price_delta": 0},
+            {"id": "mod_002", "name": "Extra Spicy", "urdu": "zyada teekha", "price_delta": 0},
+            {"id": "mod_003", "name": "Half Portion", "urdu": "adha", "price_delta": -200}
+          ],
+          "preparation_minutes": 20
+        },
+        {
+          "id": "item_002",
+          "canonical_name": "Mutton Karahi",
+          "urdu_name": "مٹن کڑاہی",
+          "price": 1200,
+          "available": true,
+          "aliases": ["mutton karahi", "gosht karahi", "lamb karahi"],
+          "modifications": [
+            {"id": "mod_001", "name": "No Spice", "urdu": "bina mirch", "price_delta": 0},
+            {"id": "mod_003", "name": "Half Portion", "urdu": "adha", "price_delta": -400}
+          ],
+          "preparation_minutes": 25
+        },
+        {
+          "id": "item_003",
+          "canonical_name": "Beef Burger",
+          "urdu_name": "بیف برگر",
+          "price": 450,
+          "available": true,
+          "aliases": ["beef burger", "burger", "beaf burger"],
+          "modifications": [
+            {"id": "mod_004", "name": "No Onion", "urdu": "bina pyaz", "price_delta": 0},
+            {"id": "mod_005", "name": "No Cheese", "urdu": "bina cheese", "price_delta": -30},
+            {"id": "mod_006", "name": "Extra Cheese", "urdu": "zyada cheese", "price_delta": 50}
+          ],
+          "preparation_minutes": 10
+        },
+        {
+          "id": "item_004",
+          "canonical_name": "Chicken Biryani",
+          "urdu_name": "چکن بریانی",
+          "price": 550,
+          "available": true,
+          "aliases": ["biryani", "chicken biryani", "murgh biryani"],
+          "modifications": [
+            {"id": "mod_007", "name": "Extra Raita", "urdu": "extra raita", "price_delta": 30},
+            {"id": "mod_001", "name": "No Spice", "urdu": "bina mirch", "price_delta": 0}
+          ],
+          "preparation_minutes": 15
+        },
+        {
+          "id": "item_005",
+          "canonical_name": "Seekh Kebab",
+          "urdu_name": "سیخ کباب",
+          "price": 350,
+          "available": true,
+          "aliases": ["seekh kebab", "kebab", "seekh"],
+          "modifications": [],
+          "preparation_minutes": 12
+        },
+        {
+          "id": "item_006",
+          "canonical_name": "Dal Makhani",
+          "urdu_name": "دال مکھنی",
+          "price": 300,
+          "available": true,
+          "aliases": ["dal makhani", "makhani dal", "black dal"],
+          "modifications": [
+            {"id": "mod_001", "name": "No Spice", "urdu": "bina mirch", "price_delta": 0}
+          ],
+          "preparation_minutes": 18
+        },
+        {
+          "id": "item_007",
+          "canonical_name": "Zeera Rice",
+          "urdu_name": "زیرہ چاول",
+          "price": 200,
+          "available": true,
+          "aliases": ["zeera rice", "jeera rice", "cumin rice", "chawal"],
+          "modifications": [],
+          "preparation_minutes": 10
+        },
+        {
+          "id": "item_008",
+          "canonical_name": "Nihari",
+          "urdu_name": "نہاری",
+          "price": 700,
+          "available": true,
+          "aliases": ["nihari", "nehari"],
+          "modifications": [
+            {"id": "mod_008", "name": "Extra Nalli", "urdu": "extra nalli", "price_delta": 100}
+          ],
+          "preparation_minutes": 20
+        }
+      ]
+    },
+    {
+      "id": "cat_002",
+      "name": "Bread",
+      "items": [
+        {
+          "id": "item_009",
+          "canonical_name": "Naan",
+          "urdu_name": "نان",
+          "price": 50,
+          "available": true,
+          "aliases": ["naan", "nan"],
+          "modifications": [
+            {"id": "mod_009", "name": "Garlic Naan", "urdu": "garlic naan", "price_delta": 30}
+          ],
+          "preparation_minutes": 5
+        },
+        {
+          "id": "item_010",
+          "canonical_name": "Roti",
+          "urdu_name": "روٹی",
+          "price": 20,
+          "available": true,
+          "aliases": ["roti", "chapati"],
+          "modifications": [],
+          "preparation_minutes": 3
+        }
+      ]
+    },
+    {
+      "id": "cat_003",
+      "name": "Drinks",
+      "items": [
+        {
+          "id": "item_011",
+          "canonical_name": "Mango Shake",
+          "urdu_name": "مینگو شیک",
+          "price": 200,
+          "available": true,
+          "aliases": ["mango shake", "mango milkshake", "shake"],
+          "modifications": [],
+          "preparation_minutes": 5
+        },
+        {
+          "id": "item_012",
+          "canonical_name": "Pepsi",
+          "urdu_name": "پیپسی",
+          "price": 80,
+          "available": true,
+          "aliases": ["pepsi", "cold drink", "cola"],
+          "modifications": [],
+          "preparation_minutes": 1
+        }
+      ]
+    }
+  ]
+}
