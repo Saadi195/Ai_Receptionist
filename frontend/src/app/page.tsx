@@ -353,6 +353,15 @@ export default function Home() {
     setAiResponse("Connecting to AI Receptionist...");
     setConversationLog([]);
 
+    if (typeof window !== "undefined" && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) {
+      const msg =
+        "Microphone access blocked! Browsers require HTTPS or localhost (http://localhost:3000) for mic permissions. If accessing via LAN IP (e.g. 192.168.x.x), please open http://localhost:3000 directly on the host machine or use ngrok/Cloudflare Tunnels.";
+      alert(msg);
+      setConnectionError(msg);
+      setIsConnecting(false);
+      return;
+    }
+
     // Initialize and unlock AudioContext during user click gesture to satisfy browser autoplay policy
     try {
       if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
