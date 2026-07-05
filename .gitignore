@@ -41,3 +41,7 @@ backend/tests/audio_samples/*.wav
 backend/tests/audio_samples/*.m4a
 backend/tests/audio_samples/*.mp3
 backend/tests/results/
+
+# Pytest
+.pytest_cache/
+backend/.pytest_cache/

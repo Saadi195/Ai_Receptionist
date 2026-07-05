@@ -16,6 +16,9 @@ import asyncio
 import json
 import threading
 import time as _time
+import random
+import string
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +49,64 @@ app.add_middleware(
 # ─── Deepgram model resolution ─────────────────────────────────────────────────
 def _resolve_dg_model() -> str:
     return os.getenv("STT_MODEL_WINNER", "nova-3")
+
+
+def generate_session_id() -> str:
+    date_part = datetime.now().strftime("%Y%m%d-%H%M")
+    rand_part = "".join(random.choices(
+        string.ascii_uppercase + string.digits, k=4
+    ))
+    return f"{date_part}-{rand_part}"
+
+
+def calc_line_total(unit_price: int, qty: str) -> int:
+    try:
+        q = str(qty).lower().replace("kg", "").strip()
+        return round(unit_price * float(q)) if float(q) > 0 else unit_price
+    except (ValueError, TypeError):
+        return unit_price
+
+
+def commit_order(
+    order: list, 
+    total: int, 
+    session_id: str,
+    db_client
+) -> tuple[str, int]:
+    """
+    Writes confirmed order to Supabase.
+    Returns order UUID on success.
+    Raises Exception on failure — caller handles recovery.
+    Never commits partial orders.
+    """
+    cleaned_order = []
+    recalc_total = 0
+    for item in order:
+        unit_price = item.get("unit_price", item.get("price", 0))
+        qty = str(item.get("quantity", item.get("qty", "1")))
+        line_total = calc_line_total(unit_price, qty)
+        recalc_total += line_total
+        cleaned_order.append({
+            "canonical_name": item.get("canonical_name", item.get("name", "Item")),
+            "quantity": qty,
+            "unit_price": unit_price,
+            "line_total": line_total,
+        })
+    
+    result = db_client.table("orders").insert({
+        "items": cleaned_order,
+        "total_amount": recalc_total,
+        "status": "pending",
+        "session_id": session_id,
+    }).execute()
+    
+    if not result.data:
+        raise Exception(f"Supabase insert returned empty data for session {session_id}")
+    
+    order_id = result.data[0]["id"]
+    print(f"[ORDER COMMITTED] id={order_id} total=PKR {recalc_total} session={session_id}", flush=True)
+    return order_id, recalc_total
+
 
 
 
@@ -104,11 +165,13 @@ async def voice_websocket(websocket: WebSocket):
     - Any in-progress TTS generation is discarded; state resets to listening
     """
     await websocket.accept()
+    session_id = generate_session_id()
+    print(f"[SESSION] New session: {session_id}", flush=True)
     loop = asyncio.get_running_loop()
     transcript_queue: asyncio.Queue[str] = asyncio.Queue()
 
     # One ConversationManager per WebSocket session
-    conv_manager = ConversationManager()
+    conv_manager = ConversationManager(session_id=session_id)
 
     api_key = os.getenv("DEEPGRAM_API_KEY")
     if not api_key:
@@ -124,6 +187,20 @@ async def voice_websocket(websocket: WebSocket):
     dg_socket = None
     audio_buffer: List[bytes] = []
     audio_lock = threading.Lock()
+    confirmation_timeout_task: Optional[asyncio.Task] = None
+    CONFIRMATION_TIMEOUT_SECS = 10
+
+    async def run_confirmation_timeout():
+        """
+        Waits CONFIRMATION_TIMEOUT_SECS seconds.
+        If state is still ORDER_CONFIRM, injects CONFIRMATION_TIMEOUT 
+        into transcript_queue so conversation_manager can handle it.
+        Runs as a separate task — does NOT touch the receive loop.
+        """
+        await asyncio.sleep(CONFIRMATION_TIMEOUT_SECS)
+        if conv_manager.state == "ORDER_CONFIRM":
+            print(f"[TIMEOUT] No confirmation received after {CONFIRMATION_TIMEOUT_SECS}s", flush=True)
+            transcript_queue.put_nowait("CONFIRMATION_TIMEOUT")
 
     # Turn detection guard: prevents EagerEndOfTurn from double-processing
     # when EndOfTurn fires very shortly after.
@@ -301,6 +378,7 @@ async def voice_websocket(websocket: WebSocket):
         Runs LLM, sends state update JSON, sends TTS audio.
         Respects interrupt_flag — discards TTS if interrupted mid-stream.
         """
+        nonlocal confirmation_timeout_task
         try:
             while True:
                 sentence = await transcript_queue.get()
@@ -324,34 +402,109 @@ async def voice_websocket(websocket: WebSocket):
                     transcript_queue.task_done()
                     continue
 
-                # Send state update to browser
-                state_msg = {
-                    "type": "state_update",
-                    "state": response_dict.get("state", "SLEEPING"),
-                    "current_order": response_dict.get("current_order", []),
-                    "order_total": response_dict.get("order_total", 0),
-                    "response_text": response_dict.get("response_text", ""),
-                    "action": response_dict.get("action", "none"),
-                    "session_id": conv_manager.session_id,
-                }
-                try:
-                    await websocket.send_json(state_msg)
-                except Exception:
-                    break
+                action = response_dict.get("action", "none")
+                if action == "send_to_kitchen":
+                    try:
+                        db = get_supabase()
+                        order_id, committed_total = await asyncio.to_thread(
+                            commit_order,
+                            response_dict["current_order"],
+                            response_dict["order_total"],
+                            session_id,
+                            db,
+                        )
+                        print(f"[TICKET] Session={session_id} Token={session_id[-4:]} Total=PKR {committed_total}", flush=True)
+                        
+                        await websocket.send_json({
+                            "type": "order_confirmed",
+                            "order_id": order_id,
+                            "session_id": session_id,
+                            "token": session_id[-4:],
+                            "order_total": committed_total,
+                            "items": response_dict["current_order"],
+                        })
+                        
+                        resp_text = response_dict.get("response_text", "")
+                        if resp_text and resp_text.strip() and not interrupt_flag.is_set():
+                            audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
+                            if audio_bytes and not interrupt_flag.is_set():
+                                try:
+                                    await websocket.send_bytes(audio_bytes)
+                                except Exception:
+                                    break
+                    except Exception as e:
+                        print(f"[COMMIT ERROR] {e}", flush=True)
+                        await websocket.send_json({
+                            "type": "state_update",
+                            "state": "TAKING_ORDER",
+                            "current_order": response_dict.get("current_order", []),
+                            "order_total": response_dict.get("order_total", 0),
+                            "response_text": "Maafi chahta hoon, ek masla aa gaya. Kya aap apna order dobara confirm kar sakte hain?",
+                            "session_id": session_id,
+                        })
+                        audio = await asyncio.to_thread(
+                            generate_speech,
+                            "Maafi chahta hoon, ek masla aa gaya. Order dobara confirm karein."
+                        )
+                        if audio and not interrupt_flag.is_set():
+                            try:
+                                await websocket.send_bytes(audio)
+                            except Exception:
+                                break
+                elif action == "session_timeout":
+                    print(f"[TIMEOUT] Session {session_id} timed out at ORDER_CONFIRM", flush=True)
+                    await websocket.send_json({
+                        "type": "session_timeout",
+                        "session_id": session_id,
+                    })
+                    resp_text = response_dict.get("response_text", "")
+                    if resp_text and resp_text.strip() and not interrupt_flag.is_set():
+                        audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
+                        if audio_bytes and not interrupt_flag.is_set():
+                            try:
+                                await websocket.send_bytes(audio_bytes)
+                            except Exception:
+                                break
+                else:
+                    # Send state update to browser
+                    state_msg = {
+                        "type": "state_update",
+                        "state": response_dict.get("state", "SLEEPING"),
+                        "current_order": response_dict.get("current_order", []),
+                        "order_total": response_dict.get("order_total", 0),
+                        "response_text": response_dict.get("response_text", ""),
+                        "action": action,
+                        "session_id": conv_manager.session_id,
+                    }
+                    try:
+                        await websocket.send_json(state_msg)
+                    except Exception:
+                        break
 
-                # Generate TTS audio
-                resp_text = response_dict.get("response_text", "")
-                if resp_text and resp_text.strip() and not interrupt_flag.is_set():
-                    audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
+                    # Generate TTS audio
+                    resp_text = response_dict.get("response_text", "")
+                    if resp_text and resp_text.strip() and not interrupt_flag.is_set():
+                        audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
 
-                    # Final interrupt check before sending audio bytes
-                    if audio_bytes and not interrupt_flag.is_set():
-                        try:
-                            await websocket.send_bytes(audio_bytes)
-                        except Exception:
-                            break
-                    elif interrupt_flag.is_set():
-                        print("[INTERRUPTION] TTS audio discarded — customer interrupted", flush=True)
+                        # Final interrupt check before sending audio bytes
+                        if audio_bytes and not interrupt_flag.is_set():
+                            try:
+                                await websocket.send_bytes(audio_bytes)
+                            except Exception:
+                                break
+                        elif interrupt_flag.is_set():
+                            print("[INTERRUPTION] TTS audio discarded — customer interrupted", flush=True)
+
+                # Manage confirmation timeout task
+                current_state = response_dict.get("state", "SLEEPING") if action not in ["send_to_kitchen", "session_timeout"] else "SLEEPING"
+                if current_state == "ORDER_CONFIRM":
+                    if confirmation_timeout_task and not confirmation_timeout_task.done():
+                        confirmation_timeout_task.cancel()
+                    confirmation_timeout_task = asyncio.create_task(run_confirmation_timeout())
+                else:
+                    if confirmation_timeout_task and not confirmation_timeout_task.done():
+                        confirmation_timeout_task.cancel()
+                        confirmation_timeout_task = None
 
                 transcript_queue.task_done()
 
@@ -389,6 +542,8 @@ async def voice_websocket(websocket: WebSocket):
         for task in pending:
             task.cancel()
     finally:
+        if confirmation_timeout_task and not confirmation_timeout_task.done():
+            confirmation_timeout_task.cancel()
         stop_event.set()
         if dg_socket:
             try:
@@ -396,3 +551,4 @@ async def voice_websocket(websocket: WebSocket):
             except Exception:
                 pass
         print("[WebSocket] Session ended, Deepgram thread stopping", flush=True)
+

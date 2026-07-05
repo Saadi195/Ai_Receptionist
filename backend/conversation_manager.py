@@ -70,11 +70,39 @@ STRICT RULES — ALWAYS FOLLOW:
    "Main sirf orders le sakta hoon. Kya aap kuch order karna chahenge?" and stay in current state.
 7. Out of stock: say "Sorry, [item] abhi available nahi hai. Kya aur kuch chahiye?"
 8. Item not on menu: say "Sorry, yeh item hamare menu mein nahi hai."
-9. When transitioning to ORDER_CONFIRM (or confirming order): YOU MUST read back the COMPLETE order \
-   with item names, quantities, individual prices, and order_total! For example: "Aap ka order confirm kar diya hai. \
-   Ek Daal Makhani 250 PKR, Ek Pepsi 80 PKR. Aap ka total bill 330 PKR hai. Apni receipt POS machine se collect kar lein. \
-   Order karne ka shukriya!" And set next_state="ORDER_CONFIRM" and action="send_to_kitchen". \
-   NEVER just say "Aap ka order confirm hai" without listing all items and total!
+9. When transitioning to ORDER_CONFIRM: YOU MUST read back the COMPLETE order \
+   with each item name, quantity, and price on a separate line. \
+   End with total: "Kul bill: PKR {order_total}. Kya yeh sahi hai?" \
+   And set next_state="ORDER_CONFIRM" and action="none". \
+   NEVER just say "Aap ka order confirm hai" without listing all items and asking confirmation!
+
+CONFIRMATION TIMEOUT:
+- If input is exactly "CONFIRMATION_TIMEOUT":
+  This means 10 seconds passed with no customer response after confirmation prompt.
+  Respond: "Lagta hai aap wahan nahi hain. Agar order karna chahein to dobara Start Ordering dabayein."
+  Set next_state to "SLEEPING"
+  Set action to "session_timeout"
+  Do NOT commit the order to kitchen.
+
+ORDER CONFIRM STATE:
+- When state is ORDER_CONFIRM, read back the COMPLETE order with each item name, quantity, and price on a separate line.
+  End with total: "Kul bill: PKR {order_total}. Kya yeh sahi hai?"
+- If customer says yes/haan/bilkul/confirm/theek hai/sahi hai:
+  Set next_state to "SLEEPING"
+  Set action to "send_to_kitchen"
+- If customer says no/nahi/galat/change/ghalat:
+  Set next_state to "ADD_MORE"
+  Set action to "none"
+  Respond: "Theek hai, kya change karna chahenge?"
+- "CONFIRMATION_TIMEOUT" input always triggers session_timeout action.
+
+ORDER CANCELLATION (works in any state except SLEEPING):
+- If customer says "cancel", "cancel sab", "naya order", "sab hatao":
+  Clear current_order to empty list
+  Set order_total to 0
+  Set next_state to "TAKING_ORDER"
+  Set action to "none"
+  Respond: "Order cancel kar diya. Kya naya order dena chahenge?"
 
 MULTI-ITEM RULES:
 10. Customer may name multiple items in one utterance: "ek karahi aur do naan"
@@ -195,6 +223,19 @@ class ConversationManager:
                 "action": "none",
             }
 
+        if user_input_clean == "CONFIRMATION_TIMEOUT":
+            resp_text = "Lagta hai aap wahan nahi hain. Agar order karna chahein to dobara Start Ordering dabayein."
+            res = {
+                "response_text": resp_text,
+                "state": "SLEEPING",
+                "next_state": "SLEEPING",
+                "current_order": self.current_order,
+                "order_total": self.order_total,
+                "action": "session_timeout",
+            }
+            self.reset()
+            return res
+
         # SLEEPING state — check for wake word only
         if self.state == "SLEEPING":
             user_lower = user_input_clean.lower()
@@ -205,6 +246,52 @@ class ConversationManager:
                     "response_text": "",
                     "state": "SLEEPING",
                     "next_state": "SLEEPING",
+                    "current_order": self.current_order,
+                    "order_total": self.order_total,
+                    "action": "none",
+                }
+
+        user_lower = user_input_clean.lower()
+        if any(cmd in user_lower for cmd in ["cancel sab", "sab hatao", "poora cancel", "naya order", "cancel order"]) or (user_lower == "cancel" and self.state != "SLEEPING"):
+            self.current_order = []
+            self.order_total = 0
+            self.state = "TAKING_ORDER"
+            resp_text = "Order cancel kar diya. Kya naya order dena chahenge?"
+            self.history.append({"role": "user", "content": user_input_clean})
+            self.history.append({"role": "assistant", "content": resp_text})
+            return {
+                "response_text": resp_text,
+                "state": "TAKING_ORDER",
+                "next_state": "TAKING_ORDER",
+                "current_order": [],
+                "order_total": 0,
+                "action": "none",
+            }
+
+        if self.state == "ORDER_CONFIRM":
+            affirmatives = ["haan", "theek", "sahi", "yes", "confirm", "bilkul", "ok", "done", "sahi hai", "theek hai"]
+            negatives = ["nahi", "no", "not", "galat", "ghalat", "change", "hatao", "remove", "aur"]
+            if any(w in user_lower for w in affirmatives) and not any(w in user_lower for w in negatives):
+                resp_text = f"Aap ka order confirm kar diya hai. Aap ka total hua hai {self.order_total} PKR. Apni receipt POS machine se collect kar lein. Order karne ka shukriya!"
+                res = {
+                    "response_text": resp_text,
+                    "state": "SLEEPING",
+                    "next_state": "SLEEPING",
+                    "current_order": self.current_order,
+                    "order_total": self.order_total,
+                    "action": "send_to_kitchen",
+                }
+                self.reset()
+                return res
+            elif any(w in user_lower for w in negatives):
+                self.state = "ADD_MORE"
+                resp_text = "Theek hai, kya change karna chahenge?"
+                self.history.append({"role": "user", "content": user_input_clean})
+                self.history.append({"role": "assistant", "content": resp_text})
+                return {
+                    "response_text": resp_text,
+                    "state": "ADD_MORE",
+                    "next_state": "ADD_MORE",
                     "current_order": self.current_order,
                     "order_total": self.order_total,
                     "action": "none",
@@ -287,38 +374,11 @@ class ConversationManager:
             if len(self.history) > 20:
                 self.history = self.history[-20:]
 
-            # Handle order confirmed → write to Supabase then reset
-            if self.state == "ORDER_CONFIRM" or action == "send_to_kitchen":
-                action = "send_to_kitchen"
-                self.state = "ORDER_CONFIRM"
-                try:
-                    db = get_supabase()
-                    db.table("orders").insert({
-                        "items": self.current_order,
-                        "total_amount": self.order_total,
-                        "status": "pending",
-                        "session_id": self.session_id,
-                    }).execute()
-                except Exception as e:
-                    print(f"[ERROR] Failed to write order to Supabase: {e}")
-
-                # Ensure complete confirmation script is read back with item details and total
-                items_list = []
-                for item in self.current_order:
-                    qty = item.get("qty", 1)
-                    name = item.get("name", "item")
-                    items_list.append(f"{qty} {name}")
-                items_str = ", ".join(items_list) if items_list else "aap ka order"
-                response_text = (
-                    f"Aap ka order confirm kar diya hai: {items_str}. "
-                    f"Aap ka total hua hai {self.order_total} PKR. "
-                    f"Apni receipt POS machine se collect kar lein. Order karne ka shukriya!"
-                )
-
+            if action in ["send_to_kitchen", "session_timeout"]:
                 final_response = {
                     "response_text": response_text,
-                    "state": "ORDER_CONFIRM",
-                    "next_state": "ORDER_CONFIRM",
+                    "state": "SLEEPING",
+                    "next_state": "SLEEPING",
                     "current_order": self.current_order,
                     "order_total": self.order_total,
                     "action": action,

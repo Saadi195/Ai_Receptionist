@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Orb from "../components/Orb";
 import type { OrbState } from "../components/Orb";
 import { useMicVAD } from "@ricky0123/vad-react";
+import ReceiptScreen from "@/components/ReceiptScreen";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ interface OrderItem {
 }
 
 interface WsStateUpdate {
-  type: "state_update" | "transcript" | "error";
+  type: "state_update" | "transcript" | "error" | "order_confirmed" | "session_timeout";
   state?: ConversationState;
   current_order?: OrderItem[];
   order_total?: number;
@@ -36,6 +37,9 @@ interface WsStateUpdate {
   session_id?: string;
   text?: string;
   message?: string;
+  order_id?: string;
+  token?: string;
+  items?: any[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -98,8 +102,17 @@ export default function Home() {
   const [conversationLog, setConversationLog] = useState<Array<{ sender: "user" | "ai"; text: string }>>([]);
   const transcriptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Receipt & Confirmation state ─────────────────────────────────────────
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [orderToken, setOrderToken] = useState("");
+  const [orderId, setOrderId] = useState("");
+  const [confirmedTotal, setConfirmedTotal] = useState(0);
+  const [confirmedItems, setConfirmedItems] = useState<any[]>([]);
+  const [sessionId, setSessionId] = useState("");
+
   // ── Refs ─────────────────────────────────────────────────────────────────
   const wsRef = useRef<WebSocket | null>(null);
+  const vadRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const isSpeakingRef = useRef(false);
@@ -205,44 +218,28 @@ export default function Home() {
               setAiResponse(msg.response_text);
               setConversationLog((prev) => [...prev, { sender: "ai", text: msg.response_text! }]);
             }
+          }
 
-            // Order confirmed or session complete → stop microphone and navigate to order summary
-            if (
-              (msg.state === "ORDER_CONFIRM" || msg.action === "send_to_kitchen" || msg.state === "SLEEPING") &&
-              sessionActiveRef.current
-            ) {
-              if (typeof window !== "undefined") {
-                const orderNum = (msg.session_id ?? Math.random().toString(36).substring(2, 8)).slice(-6).toUpperCase();
-                localStorage.setItem(
-                  "latest_order",
-                  JSON.stringify({
-                    order_number: orderNum,
-                    items: msg.current_order ?? currentOrder,
-                    total: msg.order_total ?? orderTotal,
-                    date: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                  })
-                );
+          if (msg.type === "order_confirmed") {
+            setOrderId(msg.order_id || "");
+            setOrderToken(msg.token || "");
+            setConfirmedTotal(msg.order_total || 0);
+            setConfirmedItems(msg.items || []);
+            setSessionId(msg.session_id || "");
+            setShowReceipt(true);
+            if (vadRef.current) vadRef.current.pause();
+          }
+
+          if (msg.type === "session_timeout") {
+            setTimeout(() => {
+              stopCurrentAudio();
+              setSessionActive(false);
+              setOrbState("sleeping");
+              if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
               }
-
-              // Wait for AI to finish speaking confirmation message before navigating
-              const startCheckTime = Date.now();
-              const checkInterval = setInterval(() => {
-                const elapsed = Date.now() - startCheckTime;
-                // Wait at least 3.5 seconds for speech audio to arrive and start playing.
-                // Then navigate once AI finishes speaking (or after 14 seconds fallback).
-                if ((elapsed > 3500 && !isSpeakingRef.current) || elapsed > 14000) {
-                  clearInterval(checkInterval);
-                  stopCurrentAudio();
-                  setSessionActive(false);
-                  setOrbState("sleeping");
-                  if (wsRef.current) {
-                    wsRef.current.close();
-                    wsRef.current = null;
-                  }
-                  router.push("/order-summary");
-                }
-              }, 300);
-            }
+            }, 4000);
           }
 
           if (msg.type === "error") {
@@ -302,12 +299,14 @@ export default function Home() {
           return;
         }
         stopCurrentAudio();
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: "interruption" }));
+        // Send interrupt signal to backend so it cancels Groq/TTS streams
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: "interrupt" }));
         }
+        setOrbState("listening");
+      } else {
+        setOrbState("listening");
       }
-
-      setOrbState("listening");
     },
 
     onSpeechEnd: (audio: Float32Array) => {
@@ -342,7 +341,8 @@ export default function Home() {
     minSpeechMs: 150,
     preSpeechPadMs: 200,
     redemptionMs: 350,
-  });
+  } as any);
+  vadRef.current = vad;
 
   // ─── Session start ─────────────────────────────────────────────────────
 
@@ -871,18 +871,45 @@ export default function Home() {
           </div>
         )}
 
-        {/* Dev link */}
+        {/* Dev link / Receipt button */}
         <div style={{ marginTop: "auto" }}>
-          <Link
-            href="/order-summary"
-            style={{ color: "#4b4560", fontSize: "0.75rem", textDecoration: "none" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#a09eb0")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#4b4560")}
-          >
-            Dev: Order Summary →
-          </Link>
+          {orderToken ? (
+            <button
+              onClick={() => setShowReceipt(true)}
+              className="w-full bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/40 text-emerald-300 py-2.5 px-4 rounded-xl text-sm font-medium transition duration-200 flex items-center justify-center gap-2 mt-4"
+            >
+              <span>View Confirmed Receipt (#{orderToken})</span>
+            </button>
+          ) : (
+            <Link
+              href="/order-summary"
+              style={{ color: "#4b4560", fontSize: "0.75rem", textDecoration: "none" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#a09eb0")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#4b4560")}
+            >
+              Dev: Order Summary →
+            </Link>
+          )}
         </div>
       </main>
+
+      {showReceipt && (
+        <ReceiptScreen
+          sessionId={sessionId}
+          token={orderToken}
+          items={confirmedItems}
+          orderTotal={confirmedTotal}
+          restaurantName="Savour Foods"
+          onClose={() => {
+            setShowReceipt(false);
+            setOrderToken("");
+            setOrderId("");
+            setConfirmedTotal(0);
+            setConfirmedItems([]);
+            if (vadRef.current) vadRef.current.start();
+          }}
+        />
+      )}
 
       {/* Inline keyframes */}
       <style>{`
