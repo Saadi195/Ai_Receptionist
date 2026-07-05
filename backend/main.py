@@ -1,12 +1,14 @@
 """
-Restaurant AI Ordering API — Phase 3
-FastAPI backend with Deepgram SDK 7.2.0 WebSocket streaming, Groq LLM, ElevenLabs TTS
+Restaurant AI Ordering API — Phase 4
+FastAPI backend with Deepgram SDK 7.2.0, VAD audio (linear16/16000Hz),
+interruption handling, dual EndOfTurn/EagerEndOfTurn turn detection.
 """
 
 import os
 import asyncio
 import json
 import threading
+import time as _time
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +26,7 @@ load_dotenv()
 
 app = FastAPI(
     title="Restaurant AI Ordering API",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -36,8 +38,6 @@ app.add_middleware(
 )
 
 # ─── Deepgram model mapping ────────────────────────────────────────────────────
-# SDK 7.2.0 uses "flux-general-multi" for multilingual (including Urdu-English)
-# STT_MODEL_WINNER from .env is mapped here.
 _DG_MODEL_MAP = {
     "nova-3": "flux-general-multi",
     "nova-2": "flux-general-en",
@@ -90,10 +90,22 @@ def create_order(order: CreateOrderRequest):
 @app.websocket("/ws/voice")
 async def voice_websocket(websocket: WebSocket):
     """
-    Browser connects via WebSocket.
-    Browser sends raw audio bytes (webm/opus from MediaRecorder).
-    Backend streams to Deepgram v2, receives EndOfTurn transcript,
-    passes to ConversationManager, sends TTS audio + state JSON back.
+    Phase 4 WebSocket handler.
+
+    Audio flow:
+    - Browser VAD captures speech segments as Float32Array @ 16000Hz
+    - Frontend converts to Int16Array and sends as raw bytes over WS
+    - Backend streams to Deepgram (encoding=linear16, sample_rate=16000)
+    - Deepgram returns ListenV2TurnInfo messages
+    - EndOfTurn  → process immediately (primary trigger)
+    - EagerEndOfTurn → process only if EndOfTurn hasn't fired within 800ms (fallback)
+
+    Interruption flow:
+    - Frontend VAD onSpeechStart fires while AI is speaking
+    - Frontend sends {"type": "interruption"} JSON over WS
+    - Backend receives it in receive_from_browser(), sets interrupt_flag
+    - process_transcripts_and_respond() checks flag before sending TTS bytes
+    - Any in-progress TTS generation is discarded; state resets to listening
     """
     await websocket.accept()
     loop = asyncio.get_running_loop()
@@ -110,52 +122,79 @@ async def voice_websocket(websocket: WebSocket):
     dg_client = DeepgramClient(api_key=api_key)
     dg_model = _resolve_dg_model()
 
-    # ── Deepgram connection (runs in a background thread) ──────────────────────
-    # We use threading + asyncio queue to bridge sync Deepgram SDK → async FastAPI
-    dg_socket = None
-    dg_thread = None
+    # ── Per-session state ──────────────────────────────────────────────────────
     stop_event = threading.Event()
-
+    interrupt_flag = asyncio.Event()       # Set when frontend sends interruption
+    dg_socket = None
     audio_buffer: List[bytes] = []
     audio_lock = threading.Lock()
 
+    # Turn detection guard: prevents EagerEndOfTurn from double-processing
+    # when EndOfTurn fires very shortly after.
+    last_end_of_turn_time: float = 0.0    # monotonic time
+    EAGER_GUARD_SECS: float = 0.8         # 800ms — skip EagerEndOfTurn if EndOfTurn fired recently
+
     def deepgram_thread_fn():
-        """Runs in a background thread. Opens Deepgram v2 WebSocket and iterates."""
-        nonlocal dg_socket
+        """
+        Runs in a background thread.
+        Opens Deepgram v2 WebSocket (linear16/16000Hz — VAD output format).
+        Forwards audio chunks, receives TurnInfo messages, puts final transcripts in queue.
+        """
+        nonlocal dg_socket, last_end_of_turn_time
         try:
             with dg_client.listen.v2.connect(
                 model=dg_model,
-                encoding="opus",
-                sample_rate=48000,
+                # Phase 4: VAD output is Int16 PCM at 16000Hz
+                encoding="linear16",
+                sample_rate=16000,
                 keyterm=[
                     "Chicken Karahi", "Mutton Karahi", "Beef Burger", "Chicken Burger",
                     "Zeera Rice", "Chicken Biryani", "Seekh Kebab", "Mango Shake",
-                    "Dal Makhani", "Garlic Naan", "Nihari", "Naan", "Roti", "Pepsi"
+                    "Dal Makhani", "Garlic Naan", "Nihari", "Naan", "Roti", "Pepsi",
                 ],
             ) as socket:
                 dg_socket = socket
+
                 for message in socket:
                     if stop_event.is_set():
                         break
-                    # Send buffered audio
+
+                    # Flush any buffered audio first
                     with audio_lock:
                         for chunk in audio_buffer:
                             socket.send_media(chunk)
                         audio_buffer.clear()
 
-                    # Process incoming transcription messages
-                    if isinstance(message, ListenV2TurnInfo):
-                        event_type = message.event
-                        # "EndOfTurn" means a complete utterance is ready
-                        if hasattr(event_type, 'value'):
-                            is_end = event_type.value in ("EndOfTurn", "EagerEndOfTurn")
-                        else:
-                            is_end = str(event_type) in ("EndOfTurn", "EagerEndOfTurn")
+                    if not isinstance(message, ListenV2TurnInfo):
+                        continue
 
-                        if is_end and message.transcript and message.transcript.strip():
-                            transcript = message.transcript.strip()
-                            print(f"[TURN END TRANSCRIPT]: {transcript}")
+                    transcript = (message.transcript or "").strip()
+                    if not transcript:
+                        continue
+
+                    # Determine event type (handles both string and enum)
+                    event_val = (
+                        message.event.value
+                        if hasattr(message.event, "value")
+                        else str(message.event)
+                    )
+
+                    now = _time.monotonic()
+
+                    if event_val == "EndOfTurn":
+                        # Primary trigger — process always
+                        last_end_of_turn_time = now
+                        print(f"[EndOfTurn]: {transcript}")
+                        loop.call_soon_threadsafe(transcript_queue.put_nowait, transcript)
+
+                    elif event_val == "EagerEndOfTurn":
+                        # Fallback — only fire if EndOfTurn hasn't recently processed this utterance
+                        elapsed = now - last_end_of_turn_time
+                        if elapsed > EAGER_GUARD_SECS:
+                            print(f"[EagerEndOfTurn fallback]: {transcript}")
                             loop.call_soon_threadsafe(transcript_queue.put_nowait, transcript)
+                        else:
+                            print(f"[EagerEndOfTurn suppressed — EndOfTurn fired {elapsed*1000:.0f}ms ago]")
 
         except Exception as e:
             if not stop_event.is_set():
@@ -165,40 +204,83 @@ async def voice_websocket(websocket: WebSocket):
     dg_thread.start()
 
     async def receive_from_browser():
-        """Receives audio bytes from browser WebSocket and buffers them for Deepgram."""
+        """
+        Receives messages from the browser WebSocket.
+        - bytes  → audio from VAD (Int16 PCM, 16000Hz) → forward to Deepgram
+        - text   → JSON control messages (interruption signal)
+        """
+        nonlocal last_end_of_turn_time
         try:
             while True:
                 message = await websocket.receive()
+
                 if "bytes" in message and message["bytes"]:
                     chunk = message["bytes"]
-                    with audio_lock:
-                        audio_buffer.append(chunk)
-                    # Also send immediately to Deepgram if socket is ready
+                    # Forward immediately if socket is ready, else buffer
                     if dg_socket is not None:
                         try:
                             dg_socket.send_media(chunk)
-                            with audio_lock:
-                                audio_buffer.clear()
                         except Exception as e:
                             print(f"[Deepgram send error]: {e}")
+                            with audio_lock:
+                                audio_buffer.append(chunk)
+                    else:
+                        with audio_lock:
+                            audio_buffer.append(chunk)
+
+                elif "text" in message and message["text"]:
+                    try:
+                        data = json.loads(message["text"])
+                        msg_type = data.get("type", "")
+
+                        if msg_type == "interruption":
+                            # Customer started speaking while AI was talking
+                            print("[INTERRUPTION] Frontend interrupted AI speech")
+                            interrupt_flag.set()           # Signal TTS sender to stop
+                            # Reset turn detection guard so next utterance is fresh
+                            last_end_of_turn_time = 0.0
+
+                    except json.JSONDecodeError:
+                        pass
+
                 elif message.get("type") == "websocket.disconnect":
                     break
+
         except WebSocketDisconnect:
             pass
         except Exception as e:
             print(f"[WebSocket receive error]: {e}")
 
     async def process_transcripts_and_respond():
-        """Takes completed utterances from queue, runs LLM, sends TTS audio back."""
+        """
+        Consumes completed utterances from queue.
+        Runs LLM, sends state update JSON, sends TTS audio.
+        Respects interrupt_flag — discards TTS if interrupted mid-stream.
+        """
         try:
             while True:
                 sentence = await transcript_queue.get()
-                print(f"[PROCESSING TRANSCRIPT]: {sentence}")
+                print(f"[PROCESSING]: {sentence}")
+
+                # Clear any pending interrupt before processing new utterance
+                interrupt_flag.clear()
+
+                # Send interim transcript display to frontend
+                try:
+                    await websocket.send_json({"type": "transcript", "text": sentence})
+                except Exception:
+                    break
 
                 # Run blocking LLM call in thread pool
                 response_dict = await asyncio.to_thread(conv_manager.process_input, sentence)
 
-                # Send state update JSON to browser
+                # Check if interrupted while LLM was thinking
+                if interrupt_flag.is_set():
+                    print("[INTERRUPTION] Discarding LLM response — customer spoke again")
+                    transcript_queue.task_done()
+                    continue
+
+                # Send state update to browser
                 state_msg = {
                     "type": "state_update",
                     "state": response_dict.get("state", "SLEEPING"),
@@ -211,15 +293,19 @@ async def voice_websocket(websocket: WebSocket):
                 except Exception:
                     break
 
-                # Generate and send TTS audio
+                # Generate TTS audio
                 resp_text = response_dict.get("response_text", "")
-                if resp_text and resp_text.strip():
+                if resp_text and resp_text.strip() and not interrupt_flag.is_set():
                     audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
-                    if audio_bytes:
+
+                    # Final interrupt check before sending audio bytes
+                    if audio_bytes and not interrupt_flag.is_set():
                         try:
                             await websocket.send_bytes(audio_bytes)
                         except Exception:
                             break
+                    elif interrupt_flag.is_set():
+                        print("[INTERRUPTION] TTS audio discarded — customer interrupted")
 
                 transcript_queue.task_done()
 

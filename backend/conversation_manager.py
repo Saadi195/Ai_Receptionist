@@ -1,3 +1,12 @@
+"""
+ConversationManager — Phase 4
+Upgrades over Phase 3:
+- History cap raised from 10 → 20 turns
+- Multi-item parsing rules in system prompt
+- Order modification rules (remove, replace, clear, increment)
+- accumulated_interim attribute (for interruption reset signal)
+"""
+
 import os
 import json
 import time
@@ -28,7 +37,9 @@ WAKE_WORDS = [
     "hi ai receptionist",
 ]
 
-SYSTEM_PROMPT_TEMPLATE = """You are an AI Receptionist for Savour Foods restaurant, taking voice orders from customers in Urdu-English code-switched language (e.g., "Chicken karahi chahiye, 1 kg", "Two beef burgers without onion").
+SYSTEM_PROMPT_TEMPLATE = """\
+You are an AI Receptionist for Savour Foods restaurant, taking voice orders from customers \
+in Urdu-English code-switched language (e.g., "Chicken karahi chahiye, 1 kg", "Two beef burgers without onion").
 
 Current State: {current_state}
 Current Order JSON: {current_order}
@@ -42,22 +53,51 @@ VALID STATES:
 - SLEEPING: Waiting for wake word.
 - GREETING: Welcoming customer after wake word.
 - TAKING_ORDER: Customer is specifying menu items.
-- ITEM_DISAMBIGUATION: Clarifying item details (e.g., asking Chicken/Mutton/Beef for Karahi, or half/full portion).
+- ITEM_DISAMBIGUATION: Clarifying item details (e.g., asking Chicken/Mutton/Beef for Karahi).
 - QUANTITY_CONFIRM: Confirming quantity of an item before adding it to current_order.
 - ADD_MORE: Asking if the customer wants anything else ("Kuch aur chahiye?").
 - MENU_QUERY: Answering questions about menu items or prices.
 - ORDER_CONFIRM: Final order readback and sending to kitchen.
 
-STRICT RULES:
+STRICT RULES — ALWAYS FOLLOW:
 1. Never confirm an item not in the menu.
 2. Never invent prices — use only prices from menu JSON.
 3. Never add an item to current_order until quantity is confirmed!
 4. Always respond in Urdu-English code-switched language.
-5. For karahi items, always ask variant (chicken/mutton/beef) before quantity! If customer just says "karahi", transition to ITEM_DISAMBIGUATION and ask which type.
-6. Irrelevant questions (weather, politics, anything non-food): respond "Main sirf orders le sakta hoon. Kya aap kuch order karna chahenge?" and stay in current state.
+5. For karahi items, always ask variant (chicken/mutton/beef) before quantity! \
+   If customer just says "karahi", transition to ITEM_DISAMBIGUATION and ask which type.
+6. Irrelevant questions (weather, politics, non-food): respond \
+   "Main sirf orders le sakta hoon. Kya aap kuch order karna chahenge?" and stay in current state.
 7. Out of stock: say "Sorry, [item] abhi available nahi hai. Kya aur kuch chahiye?"
 8. Item not on menu: say "Sorry, yeh item hamare menu mein nahi hai."
-9. On ORDER_CONFIRM read back complete order with prices and total, then say "Apna ticket aur bill POS se hasil karein. Shukriya!" and set action="send_to_kitchen".
+9. On ORDER_CONFIRM: read back complete order with individual prices and total, \
+   then say "Apna ticket aur bill POS se hasil karein. Shukriya!" and set action="send_to_kitchen".
+
+MULTI-ITEM RULES:
+10. Customer may name multiple items in one utterance: "ek karahi aur do naan"
+    - Parse ALL items from the utterance.
+    - Process them in order: if any item needs disambiguation (e.g., karahi variant), \
+      handle that first before moving to the next item.
+    - If ALL items have clear quantities and no ambiguity, add ALL to current_order in one response, \
+      then transition to ADD_MORE.
+    - Never skip an item because it appears later in the utterance.
+
+ORDER MODIFICATION RULES:
+11. "woh wala nahi chahiye" / "remove [item]" / "hatao [item]" / "[item] nahi chahiye" \
+    → Remove that item from current_order. Confirm what was removed. Read back the remaining order.
+12. "change karo [item] ko [new item]" → Replace item in current_order with the new item. Confirm.
+13. "cancel sab" / "sab hatao" / "poora cancel" / "naya order" \
+    → Clear entire current_order completely. Set order_total to 0. Transition to TAKING_ORDER. \
+    Confirm: "Aap ka poora order cancel ho gaya. Kya naya order dena chahenge?"
+14. After ANY modification: set current_order and order_total correctly in your JSON response, \
+    then read back the COMPLETE updated order.
+15. Never remove an item without explicitly confirming WHICH item was removed.
+
+REPEAT-ITEM RULES:
+16. "ek aur [item]" / "same again" / "aur [qty] [item]" / "dobara" \
+    → Increase the quantity of the existing matching item in current_order. \
+    Do NOT add a duplicate line — update qty and line_total of the existing entry.
+17. "same wala aur ek" → increase quantity of the most recently added item.
 
 You MUST respond with ONLY valid JSON matching this exact structure (no markdown fences, no extra text):
 {{
@@ -77,16 +117,19 @@ class ConversationManager:
         self.current_order: List[Dict[str, Any]] = []
         self.order_total = 0
         self.history: List[Dict[str, str]] = []
-        
+
+        # Phase 4: used by WebSocket handler to clear transcript on interruption
+        self.accumulated_interim: str = ""
+
         # Load menu
         menu_path = Path(__file__).parent / "data" / "menu.json"
         if not menu_path.exists():
             menu_path = Path(__file__).parent.parent / "backend" / "data" / "menu.json"
         with open(menu_path, "r", encoding="utf-8") as f:
             self.menu_data = json.load(f)
-            
+
         self.menu_string = self._build_compact_menu()
-        
+
         # Init Groq client
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
@@ -104,7 +147,10 @@ class ConversationManager:
                     f"{m['name']} ({m.get('urdu', '')}): {m['price_delta']:+d} PKR"
                     for m in item.get("modifications", [])
                 ])
-                line = f"ID: {item['id']} | {item['canonical_name']} ({item.get('urdu_name', '')}) | Price: {item['price']} PKR | Status: {status} | Aliases: [{aliases}]"
+                line = (
+                    f"ID: {item['id']} | {item['canonical_name']} ({item.get('urdu_name', '')}) "
+                    f"| Price: {item['price']} PKR | Status: {status} | Aliases: [{aliases}]"
+                )
                 if mods:
                     line += f" | Mods: [{mods}]"
                 lines.append(line)
@@ -115,6 +161,7 @@ class ConversationManager:
         self.current_order = []
         self.order_total = 0
         self.history = []
+        self.accumulated_interim = ""
         self.session_id = str(uuid.uuid4())
 
     def _strip_code_fences(self, text: str) -> str:
@@ -145,7 +192,7 @@ class ConversationManager:
                 "action": "none",
             }
 
-        # SLEEPING state check
+        # SLEEPING state — check for wake word only
         if self.state == "SLEEPING":
             user_lower = user_input_clean.lower()
             if any(w in user_lower for w in WAKE_WORDS):
@@ -168,12 +215,12 @@ class ConversationManager:
             menu_string=self.menu_string,
         )
 
-        # Cap history at last 10 turns (5 user + 5 assistant)
+        # Phase 4: cap history at last 20 turns (up from 10 in Phase 3)
         messages = [{"role": "system", "content": sys_prompt}]
-        messages.extend(self.history[-10:])
+        messages.extend(self.history[-20:])
         messages.append({"role": "user", "content": user_input_clean})
 
-        # Add sleep for Groq free tier rate limit
+        # Rate-limit guard for Groq free tier (30 RPM)
         time.sleep(2)
 
         try:
@@ -181,15 +228,15 @@ class ConversationManager:
                 model="llama-3.3-70b-versatile",
                 messages=messages,
                 temperature=0.2,
-                max_tokens=500,
+                max_tokens=600,  # Slightly higher for multi-item responses
             )
             raw_content = completion.choices[0].message.content or ""
             cleaned_json = self._strip_code_fences(raw_content)
-            
+
             try:
                 data = json.loads(cleaned_json)
             except json.JSONDecodeError:
-                # Try to find JSON block if extra text exists
+                # Try to extract JSON block if LLM added surrounding text
                 match = re.search(r"\{.*\}", cleaned_json, re.DOTALL)
                 if match:
                     try:
@@ -209,17 +256,19 @@ class ConversationManager:
             if next_state in VALID_STATES:
                 self.state = next_state
             else:
-                # Reject invalid transition, stay in current state
                 next_state = self.state
 
             self.current_order = current_order
             self.order_total = order_total
 
-            # Update conversation history
+            # Update conversation history (Phase 4 cap: 20 turns)
             self.history.append({"role": "user", "content": user_input_clean})
             self.history.append({"role": "assistant", "content": response_text})
+            # Trim to last 20 messages (10 turns × 2)
+            if len(self.history) > 20:
+                self.history = self.history[-20:]
 
-            # Check if order confirmed
+            # Handle order confirmed → write to Supabase then reset
             if self.state == "ORDER_CONFIRM" and action == "send_to_kitchen":
                 try:
                     db = get_supabase()
@@ -231,8 +280,7 @@ class ConversationManager:
                     }).execute()
                 except Exception as e:
                     print(f"[ERROR] Failed to write order to Supabase: {e}")
-                
-                # We save state before reset to return in response
+
                 final_response = {
                     "response_text": response_text,
                     "state": "ORDER_CONFIRM",
