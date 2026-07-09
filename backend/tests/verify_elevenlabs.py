@@ -7,39 +7,37 @@ from elevenlabs.client import ElevenLabs
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tts_service import generate_speech
 
-load_dotenv()
+load_dotenv(override=True)
 
-def verify_elevenlabs():
+def check_voices_and_test():
     api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        print("[ERROR] ELEVENLABS_API_KEY is not set.")
-        return False
-
+    print(f"[API KEY] Using key ending in: ...{api_key[-4:] if api_key else 'NONE'}")
+    
     client = ElevenLabs(api_key=api_key)
+    
+    print("\n[VOICES] Fetching available voices from ElevenLabs account...")
     try:
-        sub = client.user.get_subscription()
-        char_count = getattr(sub, "character_count", 0)
-        char_limit = getattr(sub, "character_limit", 0)
-        remaining = char_limit - char_count
-        print(f"[ELEVENLABS SUBSCRIPTION] Character Count: {char_count}")
-        print(f"[ELEVENLABS SUBSCRIPTION] Character Limit: {char_limit}")
-        print(f"[ELEVENLABS SUBSCRIPTION] Remaining Characters: {remaining}")
-        
-        if remaining <= 0 and char_limit > 0:
-            print("[WARNING] ElevenLabs character limit reached or zero characters remaining!")
-            return False
+        response = client.voices.get_all()
+        voices = response.voices
+        print(f"Found {len(voices)} voices:")
+        for v in voices:
+            labels = v.labels or {}
+            accent = labels.get("accent", "")
+            desc = labels.get("description", "")
+            use_case = labels.get("use_case", "")
+            print(f" - ID: {v.voice_id} | Name: {v.name} | Accent/Labels: {accent} {desc} {use_case}")
     except Exception as e:
-        print(f"[WARNING] Could not fetch subscription details: {e}")
+        print(f"[ERROR] Could not list voices: {e}")
 
-    print("\n[TESTing TTS GENERATION] Testing generate_speech()...")
-    test_text = "Hello! Welcome to our restaurant."
+    print("\n[TESTing TTS GENERATION] Testing generate_speech() with eleven_multilingual_v2...")
+    test_text = "Assalam-o-Alaikum! Welcome to our restaurant. Aap kya khana pasand karenge? We have Chicken Karahi and Biryani today."
     audio = generate_speech(test_text)
     if audio and len(audio) > 0:
-        print(f"[SUCCESS] Generated {len(audio)} bytes of audio successfully from ElevenLabs!")
+        print(f"[SUCCESS] Generated {len(audio)} bytes of audio successfully with multilingual model!")
         return True
     else:
-        print("[FAILURE] Failed to generate speech from ElevenLabs.")
+        print("[FAILURE] Failed to generate speech.")
         return False
 
 if __name__ == "__main__":
-    verify_elevenlabs()
+    check_voices_and_test()

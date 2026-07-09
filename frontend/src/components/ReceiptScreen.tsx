@@ -10,6 +10,13 @@ export interface OrderItem {
   price?: number;
   unit_price?: number;
   mods?: string[];
+  modifications?: {
+    type?: string;
+    ingredient?: string;
+    display?: string;
+    urdu_display?: string;
+  }[];
+  special_note?: string;
   line_total?: number;
   [key: string]: any;
 }
@@ -91,6 +98,27 @@ export default function ReceiptScreen({
           doc.text(displayQtyName, 5, y);
           doc.text(`PKR ${lt}`, 75, y, { align: "right" });
           y += 6;
+
+          if (item.modifications && Array.isArray(item.modifications) && item.modifications.length > 0) {
+            doc.setFont("helvetica", "italic");
+            doc.setFontSize(8);
+            item.modifications.forEach((mod: any) => {
+              const modText = `-> ${mod.display || mod.ingredient || "Modification"}`.slice(0, 35);
+              doc.text(modText, 10, y);
+              y += 4.5;
+            });
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+          }
+          if (item.special_note && typeof item.special_note === "string" && item.special_note.trim() !== "") {
+            doc.setFont("helvetica", "italic");
+            doc.setFontSize(8);
+            const noteText = `-> Note: ${item.special_note.trim()}`.slice(0, 35);
+            doc.text(noteText, 10, y);
+            y += 4.5;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+          }
         });
 
         doc.text("-----------------------------------------", 40, y + 2, { align: "center" });
@@ -182,19 +210,39 @@ export default function ReceiptScreen({
             const qStr = String(item.quantity ?? item.qty ?? "1");
             const name = item.canonical_name ?? item.name ?? "Item";
             const lt = calcLineTotal(up, qStr);
+            const mods = Array.isArray(item.modifications) ? item.modifications : [];
+            const note = typeof item.special_note === "string" ? item.special_note.trim() : "";
 
             return (
               <div
                 key={idx}
-                className="flex items-center justify-between pt-3 first:pt-0 text-sm"
+                className="flex flex-col pt-3 first:pt-0 text-sm gap-1"
               >
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-800/40">
-                    {qStr}x
-                  </span>
-                  <span className="font-medium text-slate-200">{name}</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-800/40">
+                      {qStr}x
+                    </span>
+                    <span className="font-medium text-slate-200">{name}</span>
+                  </div>
+                  <span className="font-mono text-slate-300">PKR {lt}</span>
                 </div>
-                <span className="font-mono text-slate-300">PKR {lt}</span>
+                {(mods.length > 0 || note !== "") && (
+                  <div className="flex flex-col pl-6 space-y-0.5 text-xs text-amber-300 font-medium">
+                    {mods.map((mod: any, mIdx: number) => (
+                      <div key={mIdx} className="flex items-center gap-1.5">
+                        <span className="text-amber-400/80">↳</span>
+                        <span>{mod.display || mod.ingredient || "Modification"}</span>
+                      </div>
+                    ))}
+                    {note !== "" && (
+                      <div className="flex items-center gap-1.5 text-yellow-300">
+                        <span className="text-yellow-400/80">↳</span>
+                        <span>Note: {note}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -235,7 +283,7 @@ export default function ReceiptScreen({
             onClick={onClose}
             className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-medium py-3.5 px-6 rounded-2xl border border-slate-700 transition duration-200 text-center"
           >
-            Start New Order
+            ← Go Back / Start New Order
           </button>
         </div>
       </div>

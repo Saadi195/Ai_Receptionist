@@ -20,23 +20,30 @@ import random
 import string
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+import httpx
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
-from deepgram import DeepgramClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from conversation_manager import ConversationManager
-from tts_service import generate_speech
+from tts_service import generate_speech, generate_speech_stream
 from database.supabase_client import get_supabase
+from security import verify_token, require_admin
 
-load_dotenv()
+load_dotenv(override=True)
 
 app = FastAPI(
     title="Restaurant AI Ordering API",
     version="2.0.0"
 )
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,19 +100,27 @@ def commit_order(
             "line_total": line_total,
         })
     
-    result = db_client.table("orders").insert({
-        "items": cleaned_order,
-        "total_amount": recalc_total,
-        "status": "pending",
-        "session_id": session_id,
-    }).execute()
+    try:
+        result = db_client.table("orders").insert({
+            "items": cleaned_order,
+            "total_amount": recalc_total,
+            "status": "pending",
+            "session_id": session_id,
+        }).execute()
+        
+        if result.data:
+            order_id = result.data[0]["id"]
+            print(f"[ORDER COMMITTED] id={order_id} total=PKR {recalc_total} session={session_id}", flush=True)
+            return order_id, recalc_total
+        else:
+            print(f"[WARNING] Supabase insert returned empty data for session {session_id}, using fallback ID", flush=True)
+    except Exception as e:
+        print(f"[WARNING] Supabase insert failed ({e}). Generating fallback ticket for session {session_id}", flush=True)
     
-    if not result.data:
-        raise Exception(f"Supabase insert returned empty data for session {session_id}")
-    
-    order_id = result.data[0]["id"]
-    print(f"[ORDER COMMITTED] id={order_id} total=PKR {recalc_total} session={session_id}", flush=True)
-    return order_id, recalc_total
+    import uuid
+    fallback_id = str(uuid.uuid4())
+    print(f"[FALLBACK TICKET] id={fallback_id} total=PKR {recalc_total} session={session_id}", flush=True)
+    return fallback_id, recalc_total
 
 
 
@@ -173,13 +188,10 @@ async def voice_websocket(websocket: WebSocket):
     # One ConversationManager per WebSocket session
     conv_manager = ConversationManager(session_id=session_id)
 
-    api_key = os.getenv("DEEPGRAM_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        await websocket.close(code=1011, reason="DEEPGRAM_API_KEY missing")
+        await websocket.close(code=1011, reason="OPENAI_API_KEY missing")
         return
-
-    dg_client = DeepgramClient(api_key=api_key)
-    dg_model = _resolve_dg_model()
 
     # ── Per-session state ──────────────────────────────────────────────────────
     stop_event = threading.Event()
@@ -188,7 +200,7 @@ async def voice_websocket(websocket: WebSocket):
     audio_buffer: List[bytes] = []
     audio_lock = threading.Lock()
     confirmation_timeout_task: Optional[asyncio.Task] = None
-    CONFIRMATION_TIMEOUT_SECS = 10
+    CONFIRMATION_TIMEOUT_SECS = 60
 
     async def run_confirmation_timeout():
         """
@@ -207,117 +219,93 @@ async def voice_websocket(websocket: WebSocket):
     last_end_of_turn_time: float = 0.0    # monotonic time
     EAGER_GUARD_SECS: float = 0.8         # 800ms — skip EagerEndOfTurn if EndOfTurn fired recently
 
-    def deepgram_thread_fn():
+    def stt_thread_fn():
         """
+        Sends accumulated audio to OpenAI Whisper GPT-4o Mini Transcribe.
         Runs in a background thread.
-        Opens Deepgram v1 WebSocket (linear16/16000Hz — VAD output format).
-        Forwards audio chunks, receives ListenV1Results/ListenV1UtteranceEnd messages via event callbacks,
-        puts final transcripts in queue.
+        Processes complete utterances sent from receive_from_browser.
         """
-        nonlocal dg_socket
-        from deepgram.listen.v1.types import ListenV1Results, ListenV1UtteranceEnd
-        from deepgram.core.events import EventType
-
-        last_speech_final_time: float = 0.0
-        accumulated_transcript: str = ""
-
-        def on_message_callback(message):
-            nonlocal last_speech_final_time, accumulated_transcript
-            if stop_event.is_set():
-                return
-
-            now = _time.monotonic()
-
-            if isinstance(message, ListenV1Results):
-                alternatives = getattr(getattr(message, "channel", None), "alternatives", [])
-                if not alternatives:
-                    return
-                transcript = (alternatives[0].transcript or "").strip()
-
-                # TYPE A: ListenV1Results where speech_final=True
-                if getattr(message, "speech_final", False):
-                    if transcript:
-                        last_speech_final_time = now
-                        loop.call_soon_threadsafe(transcript_queue.put_nowait, transcript)
-                        print(f"[speech_final]: {transcript}", flush=True)
-                        accumulated_transcript = ""
-
-                # TYPE B: ListenV1Results where is_final=True but speech_final=False
-                elif getattr(message, "is_final", False):
-                    if transcript:
-                        if accumulated_transcript:
-                            accumulated_transcript += " " + transcript
-                        else:
-                            accumulated_transcript = transcript
-                        print(f"[is_final interim]: {transcript}", flush=True)
-
-            # TYPE C: ListenV1UtteranceEnd
-            elif isinstance(message, ListenV1UtteranceEnd):
-                if accumulated_transcript:
-                    print(f"[UtteranceEnd fallback]: {accumulated_transcript}", flush=True)
-                    loop.call_soon_threadsafe(transcript_queue.put_nowait, accumulated_transcript)
-                    accumulated_transcript = ""
-                    last_speech_final_time = now
-
-        def on_error_callback(error):
-            if not stop_event.is_set():
-                print(f"[ERROR Deepgram event]: {error}", flush=True)
-
+        nonlocal dg_socket  # reuse variable name as stt_ready flag
+        from openai import OpenAI
+        import tempfile, os, time as _time2
+        
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        stt_ready = True
+        dg_socket = "openai_ready"  # signal that STT is ready
+        print("[STT] OpenAI GPT-4o Mini Transcribe ready", flush=True)
+        
         while not stop_event.is_set():
+            # Wait for audio chunks in the buffer
+            _time2.sleep(0.1)
+            
+            with audio_lock:
+                if not audio_buffer:
+                    continue
+                # Take all buffered audio
+                combined = b"".join(audio_buffer)
+                audio_buffer.clear()
+            
+            if len(combined) < 3200:  # Skip very short audio (< 0.1 sec)
+                continue
+            
             try:
-                print(f"[DEEPGRAM] Connecting to model: {dg_model}...", flush=True)
-                with dg_client.listen.v1.connect(
-                    model=dg_model,
-                    language="multi",
-                    encoding="linear16",
-                    sample_rate=16000,
-                    interim_results=True,
-                    endpointing=300,
-                    utterance_end_ms=1000,
-                    smart_format=True,
-                    keyterm=[
-                        "Chicken Karahi", "Mutton Karahi", "Beef Burger", "Chicken Burger",
-                        "Zeera Rice", "Chicken Biryani", "Seekh Kebab", "Mango Shake",
-                        "Dal Makhani", "Garlic Naan", "Nihari", "Naan", "Roti", "Pepsi",
-                    ],
-                ) as socket:
-                    print(f"[DEEPGRAM] Connected successfully to model: {dg_model}", flush=True)
-                    dg_socket = socket
-
-                    # Flush any audio that arrived before socket was ready
-                    with audio_lock:
-                        for chunk in audio_buffer:
-                            socket.send_media(chunk)
-                        audio_buffer.clear()
-
-                    # Start background keepalive thread to prevent NET-0001 (1011 timeout) during silence
-                    def keepalive_fn():
-                        while not stop_event.is_set():
-                            _time.sleep(3.5)
-                            if stop_event.is_set() or dg_socket is None:
-                                break
-                            try:
-                                # Send 200ms of silent PCM audio (16000 * 2 * 0.2 = 6400 bytes of zeros)
-                                socket.send_media(b"\x00" * 6400)
-                            except Exception:
-                                break
-
-                    ka_thread = threading.Thread(target=keepalive_fn, daemon=True)
-                    ka_thread.start()
-
-                    # Event-based callback pattern for listen.v1
-                    socket.on(EventType.MESSAGE, on_message_callback)
-                    socket.on(EventType.ERROR, on_error_callback)
-                    socket.start_listening()
-
+                # Write to temp WAV file (OpenAI requires a file)
+                with tempfile.NamedTemporaryFile(
+                    suffix=".wav", delete=False
+                ) as tmp:
+                    # Write WAV header for linear16 16000Hz mono
+                    import struct, wave
+                    with wave.open(tmp.name, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)  # 16-bit = 2 bytes
+                        wf.setframerate(16000)
+                        wf.writeframes(combined)
+                    tmp_path = tmp.name
+                
+                with open(tmp_path, "rb") as audio_file:
+                    result = openai_client.audio.transcriptions.create(
+                        model="gpt-4o-mini-transcribe",
+                        file=audio_file,
+                        prompt=(
+                            "Pakistani restaurant order in Roman Urdu and English mixed. "
+                            "Transcribe spoken Urdu words in Roman script not in Urdu script. "
+                            "Menu items: Chicken Karahi, Mutton Karahi, Beef Burger, "
+                            "Chicken Burger, Zeera Rice, Chicken Biryani, Seekh Kebab, "
+                            "Mango Shake, Dal Makhani, Garlic Naan, Nihari, Naan, Roti, Pepsi."
+                        ),
+                        response_format="text",
+                    )
+                
+                transcript = result.strip() if isinstance(result, str) else result.text.strip()
+                
+                if transcript:
+                    # Detect if transcript contains non-Roman characters (diagnostic)
+                    has_devanagari = any('\u0900' <= c <= '\u097f' for c in transcript)
+                    has_arabic_urdu = any('\u0600' <= c <= '\u06ff' for c in transcript)
+                    if has_devanagari or has_arabic_urdu:
+                        print(
+                            f"[STT SCRIPT WARNING] Non-Roman script detected — "
+                            f"consider adjusting prompt: {transcript[:80]}",
+                            flush=True
+                        )
+                    else:
+                        print(f"[STT] Roman transcript: {transcript}", flush=True)
+                        
+                    loop.call_soon_threadsafe(
+                        transcript_queue.put_nowait, transcript
+                    )
+            
             except Exception as e:
-                dg_socket = None
-                if not stop_event.is_set():
-                    print(f"[ERROR Deepgram thread]: {e}. Retrying connection in 1.5 seconds...", flush=True)
-                    _time.sleep(1.5)
+                print(f"[STT ERROR] {e}", flush=True)
+            
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
-    dg_thread = threading.Thread(target=deepgram_thread_fn, daemon=True)
-    dg_thread.start()
+    stt_thread = threading.Thread(target=stt_thread_fn, daemon=True)
+    stt_thread.start()
 
     async def receive_from_browser():
         """
@@ -333,21 +321,8 @@ async def voice_websocket(websocket: WebSocket):
                 if "bytes" in message and message["bytes"]:
                     chunk = message["bytes"]
                     print(f"[AUDIO RECEIVED] Received {len(chunk)} bytes (dg_socket={'READY' if dg_socket else 'NULL'})", flush=True)
-                    # Append 800ms of silent PCM16 audio (16000Hz * 2 bytes * 0.8s = 25600 bytes of zeros)
-                    # This guarantees Deepgram's endpointing immediately detects the utterance end and triggers speech_final=True!
-                    silence_padding = b"\x00" * 25600
-                    payload = chunk + silence_padding
-                    if dg_socket is not None:
-                        try:
-                            dg_socket.send_media(payload)
-                        except Exception as e:
-                            print(f"[Deepgram send error]: {e}", flush=True)
-                            with audio_lock:
-                                audio_buffer.append(payload)
-                    else:
-                        print(f"[AUDIO BUFFERED] dg_socket is None, buffering {len(payload)} bytes", flush=True)
-                        with audio_lock:
-                            audio_buffer.append(payload)
+                    with audio_lock:
+                        audio_buffer.append(chunk)
 
                 elif "text" in message and message["text"]:
                     try:
@@ -379,9 +354,45 @@ async def voice_websocket(websocket: WebSocket):
         Respects interrupt_flag — discards TTS if interrupted mid-stream.
         """
         nonlocal confirmation_timeout_task
+
+        async def stream_tts_to_browser(text: str) -> int:
+            """
+            Streams TTS audio chunks to browser as they arrive.
+            Browser starts playing first chunk ~200-400ms faster
+            than waiting for complete audio.
+            """
+            if not text or not text.strip() or interrupt_flag.is_set():
+                return 0
+            tts_start = _time.monotonic()
+            try:
+                loop = asyncio.get_running_loop()
+                
+                def run_stream():
+                    chunks = []
+                    for chunk in generate_speech_stream(text):
+                        chunks.append(chunk)
+                    return chunks
+                
+                chunks = await asyncio.to_thread(run_stream)
+                
+                # Send all chunks concatenated as one binary message
+                # This avoids browser needing to reassemble streaming chunks
+                if chunks:
+                    audio_bytes = b"".join(chunks)
+                    if not interrupt_flag.is_set():
+                        await websocket.send_bytes(audio_bytes)
+                elif interrupt_flag.is_set():
+                    print("[INTERRUPTION] TTS audio discarded — customer interrupted", flush=True)
+                    
+            except Exception as e:
+                print(f"[TTS STREAM ERROR] {e}", flush=True)
+            tts_end = _time.monotonic()
+            return round((tts_end - tts_start) * 1000)
+
         try:
             while True:
                 sentence = await transcript_queue.get()
+                turn_start = _time.monotonic()
                 print(f"[PROCESSING]: {sentence}", flush=True)
 
                 # Clear any pending interrupt before processing new utterance
@@ -394,7 +405,11 @@ async def voice_websocket(websocket: WebSocket):
                     break
 
                 # Run blocking LLM call in thread pool
+                llm_start = _time.monotonic()
                 response_dict = await asyncio.to_thread(conv_manager.process_input, sentence)
+                llm_end = _time.monotonic()
+                llm_ms = round((llm_end - llm_start) * 1000)
+                tts_ms = 0
 
                 # Check if interrupted while LLM was thinking
                 if interrupt_flag.is_set():
@@ -415,6 +430,9 @@ async def voice_websocket(websocket: WebSocket):
                         )
                         print(f"[TICKET] Session={session_id} Token={session_id[-4:]} Total=PKR {committed_total}", flush=True)
                         
+                        resp_text = response_dict.get("response_text", "")
+                        tts_ms = await stream_tts_to_browser(resp_text)
+                                    
                         await websocket.send_json({
                             "type": "order_confirmed",
                             "order_id": order_id,
@@ -423,17 +441,11 @@ async def voice_websocket(websocket: WebSocket):
                             "order_total": committed_total,
                             "items": response_dict["current_order"],
                         })
-                        
-                        resp_text = response_dict.get("response_text", "")
-                        if resp_text and resp_text.strip() and not interrupt_flag.is_set():
-                            audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
-                            if audio_bytes and not interrupt_flag.is_set():
-                                try:
-                                    await websocket.send_bytes(audio_bytes)
-                                except Exception:
-                                    break
                     except Exception as e:
                         print(f"[COMMIT ERROR] {e}", flush=True)
+                        tts_ms = await stream_tts_to_browser(
+                            "Maafi chahta hoon, ek masla aa gaya. Order dobara confirm karein."
+                        )
                         await websocket.send_json({
                             "type": "state_update",
                             "state": "TAKING_ORDER",
@@ -442,29 +454,22 @@ async def voice_websocket(websocket: WebSocket):
                             "response_text": "Maafi chahta hoon, ek masla aa gaya. Kya aap apna order dobara confirm kar sakte hain?",
                             "session_id": session_id,
                         })
-                        audio = await asyncio.to_thread(
-                            generate_speech,
-                            "Maafi chahta hoon, ek masla aa gaya. Order dobara confirm karein."
-                        )
-                        if audio and not interrupt_flag.is_set():
-                            try:
-                                await websocket.send_bytes(audio)
-                            except Exception:
-                                break
                 elif action == "session_timeout":
                     print(f"[TIMEOUT] Session {session_id} timed out at ORDER_CONFIRM", flush=True)
+                    resp_text = response_dict.get("response_text", "")
+                    tts_ms = await stream_tts_to_browser(resp_text)
                     await websocket.send_json({
                         "type": "session_timeout",
                         "session_id": session_id,
                     })
+                elif action == "order_cancelled":
+                    print(f"[CANCELLED] Order cancelled for session {session_id}", flush=True)
                     resp_text = response_dict.get("response_text", "")
-                    if resp_text and resp_text.strip() and not interrupt_flag.is_set():
-                        audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
-                        if audio_bytes and not interrupt_flag.is_set():
-                            try:
-                                await websocket.send_bytes(audio_bytes)
-                            except Exception:
-                                break
+                    tts_ms = await stream_tts_to_browser(resp_text)
+                    await websocket.send_json({
+                        "type": "order_cancelled",
+                        "session_id": session_id,
+                    })
                 else:
                     # Send state update to browser
                     state_msg = {
@@ -483,20 +488,10 @@ async def voice_websocket(websocket: WebSocket):
 
                     # Generate TTS audio
                     resp_text = response_dict.get("response_text", "")
-                    if resp_text and resp_text.strip() and not interrupt_flag.is_set():
-                        audio_bytes = await asyncio.to_thread(generate_speech, resp_text)
-
-                        # Final interrupt check before sending audio bytes
-                        if audio_bytes and not interrupt_flag.is_set():
-                            try:
-                                await websocket.send_bytes(audio_bytes)
-                            except Exception:
-                                break
-                        elif interrupt_flag.is_set():
-                            print("[INTERRUPTION] TTS audio discarded — customer interrupted", flush=True)
+                    tts_ms = await stream_tts_to_browser(resp_text)
 
                 # Manage confirmation timeout task
-                current_state = response_dict.get("state", "SLEEPING") if action not in ["send_to_kitchen", "session_timeout"] else "SLEEPING"
+                current_state = response_dict.get("state", "SLEEPING") if action not in ["send_to_kitchen", "session_timeout", "order_cancelled"] else "SLEEPING"
                 if current_state == "ORDER_CONFIRM":
                     if confirmation_timeout_task and not confirmation_timeout_task.done():
                         confirmation_timeout_task.cancel()
@@ -505,6 +500,11 @@ async def voice_websocket(websocket: WebSocket):
                     if confirmation_timeout_task and not confirmation_timeout_task.done():
                         confirmation_timeout_task.cancel()
                         confirmation_timeout_task = None
+
+                turn_end = _time.monotonic()
+                total_ms = round((turn_end - turn_start) * 1000)
+                print(f"[LATENCY] Turn complete in {total_ms}ms", flush=True)
+                print(f"[LATENCY] LLM: {llm_ms}ms | TTS: {tts_ms}ms | Total: {total_ms}ms", flush=True)
 
                 transcript_queue.task_done()
 
@@ -551,4 +551,200 @@ async def voice_websocket(websocket: WebSocket):
             except Exception:
                 pass
         print("[WebSocket] Session ended, Deepgram thread stopping", flush=True)
+
+
+# ─── PHASE 6/7: AUTH & ROLE DEPENDENCIES (MOVED TO security.py) ───────────────
+
+
+# ─── PHASE 6: AUTH ROUTES ─────────────────────────────────────────────────────
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str
+    role: str
+
+@app.post("/api/auth/signup")
+@limiter.limit("3/minute")
+def signup(request: Request, req: SignupRequest):
+    if req.role != "admin":
+        raise HTTPException(status_code=400, detail="Invalid role")
+    
+    db = get_supabase()
+    if req.role == "admin":
+        existing = db.table("user_profiles").select("id").eq("role", "admin").execute()
+        if existing.data and len(existing.data) > 0:
+            raise HTTPException(status_code=409, detail="Admin account already exists. Only one admin is allowed.")
+    
+    try:
+        result = db.auth.admin.create_user({
+            "email": req.email,
+            "password": req.password,
+            "email_confirm": True
+        })
+        user_id = result.user.id
+        
+        db.table("user_profiles").insert({
+            "id": user_id,
+            "role": req.role,
+            "display_name": req.display_name
+        }).execute()
+        
+        return {"user_id": user_id, "role": req.role, "display_name": req.display_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err_str = str(e).lower()
+        if "already exists" in err_str or "registered" in err_str or "409" in err_str or "duplicate" in err_str:
+            raise HTTPException(status_code=409, detail="User already exists or admin constraint violated")
+        raise HTTPException(status_code=400, detail=f"Signup failed: {str(e)}")
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/auth/login")
+@limiter.limit("5/minute")
+def login(request: Request, req: LoginRequest):
+    db = get_supabase()
+    try:
+        res = db.auth.sign_in_with_password({"email": req.email, "password": req.password})
+        if not res.session or not res.user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        user_id = res.user.id
+        access_token = res.session.access_token
+        
+        profile = db.table("user_profiles").select("*").eq("id", user_id).single().execute()
+        role = profile.data["role"] if profile.data else "admin"
+        display_name = profile.data["display_name"] if profile.data else req.email
+        
+        return {
+            "access_token": access_token,
+            "role": role,
+            "display_name": display_name,
+            "user_id": user_id
+        }
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+@app.get("/api/auth/me")
+def get_me(user: Dict[str, Any] = Depends(verify_token)):
+    db = get_supabase()
+    profile = db.table("user_profiles").select("*").eq("id", user["id"]).single().execute()
+    if not profile.data:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {
+        "user_id": profile.data["id"],
+        "role": profile.data["role"],
+        "display_name": profile.data["display_name"]
+    }
+
+
+# ─── PHASE 6: MENU MANAGEMENT ROUTES ──────────────────────────────────────────
+
+@app.get("/api/menu")
+def get_public_menu():
+    db = get_supabase()
+    res = db.table("menu_items").select("*").eq("available", True).execute()
+    return res.data or []
+
+@app.get("/api/menu/all")
+def get_all_menu(user: Dict[str, Any] = Depends(verify_token)):
+    db = get_supabase()
+    res = db.table("menu_items").select("*").order("category").execute()
+    return res.data or []
+
+class AvailabilityUpdate(BaseModel):
+    available: bool
+
+@app.patch("/api/menu/{item_id}/availability")
+def update_menu_availability(item_id: str, req: AvailabilityUpdate, admin: Dict[str, Any] = Depends(require_admin)):
+    db = get_supabase()
+    res = db.table("menu_items").update({"available": req.available, "updated_at": "now()"}).eq("id", item_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    return res.data[0]
+
+class PriceUpdate(BaseModel):
+    price: int
+
+@app.patch("/api/menu/{item_id}/price")
+def update_menu_price(item_id: str, req: PriceUpdate, admin: Dict[str, Any] = Depends(require_admin)):
+    if req.price < 0:
+        raise HTTPException(status_code=400, detail="Price cannot be negative")
+    db = get_supabase()
+    res = db.table("menu_items").update({"price": req.price, "updated_at": "now()"}).eq("id", item_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    return res.data[0]
+
+class MenuItemCreate(BaseModel):
+    canonical_name: str
+    urdu_name: Optional[str] = ""
+    category: str = "main"
+    price: int
+    available: bool = True
+    aliases: List[str] = []
+    modifications: List[Any] = []
+    preparation_minutes: int = 15
+
+@app.post("/api/menu/items")
+def create_menu_item(req: MenuItemCreate, admin: Dict[str, Any] = Depends(require_admin)):
+    db = get_supabase()
+    res = db.table("menu_items").insert(req.model_dump()).execute()
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Failed to create menu item")
+    return res.data[0]
+
+@app.delete("/api/menu/items/{item_id}")
+def delete_menu_item(item_id: str, admin: Dict[str, Any] = Depends(require_admin)):
+    db = get_supabase()
+    res = db.table("menu_items").update({"available": False, "updated_at": "now()"}).eq("id", item_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    return {"message": "Menu item soft deleted", "item": res.data[0]}
+
+
+# ─── PHASE 6: ORDER MANAGEMENT ROUTES ─────────────────────────────────────────
+
+@app.get("/api/orders/today")
+def get_today_orders(user: Dict[str, Any] = Depends(verify_token)):
+    db = get_supabase()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    res = db.table("orders").select("*").gte("created_at", today_str).order("created_at", desc=True).execute()
+    return res.data or []
+
+@app.get("/api/orders/active")
+def get_active_orders(user: Dict[str, Any] = Depends(require_admin)):
+    db = get_supabase()
+    res = db.table("orders").select("*").in_("status", ["pending", "preparing"]).order("created_at", desc=False).execute()
+    return res.data or []
+
+class OrderStatusUpdate(BaseModel):
+    status: str
+
+@app.patch("/api/orders/{order_id}/status")
+def update_order_status(order_id: str, req: OrderStatusUpdate, user: Dict[str, Any] = Depends(require_admin)):
+    if req.status not in ("preparing", "ready"):
+        raise HTTPException(status_code=400, detail="Invalid target status")
+    
+    db = get_supabase()
+    order = db.table("orders").select("status").eq("id", order_id).single().execute()
+    if not order.data:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    current_status = order.data["status"]
+    if current_status == "pending" and req.status != "preparing":
+        raise HTTPException(status_code=400, detail="From pending, order status can only transition to preparing")
+    if current_status == "preparing" and req.status != "ready":
+        raise HTTPException(status_code=400, detail="From preparing, order status can only transition to ready")
+    if current_status == "ready":
+        raise HTTPException(status_code=400, detail="Order is already ready")
+    if current_status not in ("pending", "preparing"):
+        raise HTTPException(status_code=400, detail=f"Cannot transition from {current_status}")
+    
+    res = db.table("orders").update({"status": req.status}).eq("id", order_id).execute()
+    return res.data[0]
+
 

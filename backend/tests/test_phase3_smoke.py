@@ -77,10 +77,15 @@ def test_karahi_requires_disambiguation():
 
     # Check that multiple karahi items exist in the menu
     karahi_items = []
-    for cat in cm.menu_data.get("categories", []):
-        for item in cat.get("items", []):
+    if cm.menu_data.get("source") == "supabase":
+        for item in cm.menu_data.get("items", []):
             if "karahi" in item["canonical_name"].lower():
                 karahi_items.append(item["canonical_name"])
+    else:
+        for cat in cm.menu_data.get("categories", []):
+            for item in cat.get("items", []):
+                if "karahi" in item["canonical_name"].lower():
+                    karahi_items.append(item["canonical_name"])
 
     # Must have at least 2 karahi variants to require disambiguation
     assert len(karahi_items) >= 2, (

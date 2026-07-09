@@ -3,7 +3,15 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   allowedDevOrigins: ['192.168.56.1', 'localhost', '127.0.0.1'],
   // Allow WASM files required by onnxruntime-web (Silero VAD model)
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals = [
+        ...(Array.isArray(config.externals) ? config.externals : []),
+        "@ricky0123/vad-react",
+        "@ricky0123/vad-web",
+        "onnxruntime-web",
+      ];
+    }
     config.resolve.extensions = [
       ...(config.resolve.extensions ?? []),
       ".wasm",

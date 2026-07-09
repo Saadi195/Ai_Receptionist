@@ -78,7 +78,8 @@ def test_cm_handles_order_cancellation():
     cm.current_order = [{"canonical_name": "Chicken Karahi", "quantity": "1 kg", "unit_price": 850}]
     result = cm.process_input("cancel sab")
     assert result["current_order"] == []
-    assert result["next_state"] == "TAKING_ORDER"
+    assert result["next_state"] == "SLEEPING"
+    assert result["action"] == "order_cancelled"
 
 
 def test_cm_order_confirm_to_confirmed():

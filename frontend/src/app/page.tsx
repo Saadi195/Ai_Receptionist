@@ -3,10 +3,27 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Orb from "../components/Orb";
 import type { OrbState } from "../components/Orb";
-import { useMicVAD } from "@ricky0123/vad-react";
 import ReceiptScreen from "@/components/ReceiptScreen";
+import { useAuthStore } from "@/lib/auth-context";
+import { createClient } from "@/lib/supabase/client";
+import { User, Shield, LogOut } from "lucide-react";
+import dynamic from "next/dynamic";
+import type { VoiceOrbRef } from "@/components/VoiceOrb";
+
+const VoiceOrb = dynamic(
+  () => import("@/components/VoiceOrb"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center"
+           style={{ minWidth: 160, minHeight: 160 }}>
+        <div className="w-20 h-20 rounded-full bg-surface
+             border border-border-strong animate-pulse" />
+      </div>
+    ),
+  }
+);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +45,7 @@ interface OrderItem {
 }
 
 interface WsStateUpdate {
-  type: "state_update" | "transcript" | "error" | "order_confirmed" | "session_timeout";
+  type: "state_update" | "transcript" | "error" | "order_confirmed" | "session_timeout" | "order_cancelled";
   state?: ConversationState;
   current_order?: OrderItem[];
   order_total?: number;
@@ -82,6 +99,31 @@ function float32ToInt16(float32: Float32Array): Int16Array {
 
 export default function Home() {
   const router = useRouter();
+  const supabase = createClient();
+  const { accessToken, setAuth, clearAuth, isAuthenticated, isAdmin } = useAuthStore();
+
+  useEffect(() => {
+    const initAuth = async () => {
+      if (!accessToken) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { data: profile } = await supabase
+            .from("user_profiles")
+            .select("*")
+            .eq("id", session.user.id)
+            .single();
+          const userRole = profile?.role || "admin";
+          setAuth(session.access_token, userRole, profile?.display_name || "User", session.user.id);
+        }
+      }
+    };
+    initAuth();
+  }, [accessToken, setAuth, supabase]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    clearAuth();
+  };
 
   // ── Session & connection state ───────────────────────────────────────────
   const [sessionActive, setSessionActive] = useState(false);
@@ -112,12 +154,14 @@ export default function Home() {
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const wsRef = useRef<WebSocket | null>(null);
-  const vadRef = useRef<any>(null);
+  const vadRef = useRef<VoiceOrbRef | null>(null);
+  const [userSpeaking, setUserSpeaking] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const isSpeakingRef = useRef(false);
   const speechStartTimeRef = useRef(0);
   const sessionActiveRef = useRef(false); // mirror for callbacks
+  const pendingReceiptRef = useRef(false);
 
   // Keep sessionActiveRef in sync
   useEffect(() => {
@@ -137,6 +181,29 @@ export default function Home() {
     }
     isSpeakingRef.current = false;
   }, []);
+
+  // ─── Reset session & cleanup state ─────────────────────────────────────
+  const resetSession = useCallback(() => {
+    sessionActiveRef.current = false;
+    pendingReceiptRef.current = false;
+    if (vadRef.current) {
+      try { vadRef.current.pause(); } catch {}
+    }
+    if (wsRef.current) {
+      try { wsRef.current.close(); } catch {}
+      wsRef.current = null;
+    }
+    stopCurrentAudio();
+    setSessionActive(false);
+    setOrbState("sleeping");
+    setBackendState("SLEEPING");
+    setCurrentOrder([]);
+    setOrderTotal(0);
+    setAiResponse("");
+    setInterimTranscript("");
+    setConversationLog([]);
+    setShowReceipt(false);
+  }, [stopCurrentAudio]);
 
   // ─── Play TTS audio bytes ──────────────────────────────────────────────
 
@@ -161,8 +228,16 @@ export default function Home() {
       source.onended = () => {
         currentSourceRef.current = null;
         isSpeakingRef.current = false;
-        // Return to listening if session still active
-        setOrbState((prev) => (prev === "speaking" ? "listening" : prev));
+        if (pendingReceiptRef.current) {
+          pendingReceiptRef.current = false;
+          setShowReceipt(true);
+          if (vadRef.current) {
+            try { vadRef.current.pause(); } catch {}
+          }
+        } else {
+          // Return to listening if session still active
+          setOrbState((prev) => (prev === "speaking" ? "listening" : prev));
+        }
       };
 
       source.start();
@@ -226,20 +301,32 @@ export default function Home() {
             setConfirmedTotal(msg.order_total || 0);
             setConfirmedItems(msg.items || []);
             setSessionId(msg.session_id || "");
-            setShowReceipt(true);
-            if (vadRef.current) vadRef.current.pause();
+            if (isSpeakingRef.current) {
+              pendingReceiptRef.current = true;
+            } else {
+              setShowReceipt(true);
+              if (vadRef.current) {
+                try { vadRef.current.pause(); } catch {}
+              }
+            }
+          }
+
+          if (msg.type === "order_cancelled") {
+            setShowReceipt(false);
+            if (vadRef.current) {
+              try { vadRef.current.pause(); } catch {}
+            }
+            setAiResponse("Order cancel ho gaya. Agle customer ke liye ready hoon.");
+
+            // Show cancellation message for 3 seconds, then resetSession()
+            setTimeout(() => {
+              resetSession();
+            }, 3000);
           }
 
           if (msg.type === "session_timeout") {
-            setTimeout(() => {
-              stopCurrentAudio();
-              setSessionActive(false);
-              setOrbState("sleeping");
-              if (wsRef.current) {
-                wsRef.current.close();
-                wsRef.current = null;
-              }
-            }, 4000);
+            // Immediate reset, no delay
+            resetSession();
           }
 
           if (msg.type === "error") {
@@ -269,80 +356,41 @@ export default function Home() {
     });
   }, [playAudioBytes, stopCurrentAudio]);
 
-  // ─── VAD hook — Phase 4 core ────────────────────────────────────────────
-  //
-  // Replaces Phase 3 MediaRecorder entirely.
-  // - onSpeechStart: fires the instant human voice detected → interruption
-  // - onSpeechEnd:   fires with complete Float32Array utterance → send to backend
-  // - workletURL / modelURL must point to files in /public
+  // ─── Speech Handlers for VoiceOrb ───────────────────────────────────────
+  const handleSpeechStart = useCallback(() => {
+    console.log("SPEECH START FIRED — VAD is detecting voice");
+    console.log("wsRef current:", wsRef.current?.readyState);
+    console.log("sessionActive:", sessionActiveRef.current);
+    if (!sessionActiveRef.current) return;
 
-  const vad = useMicVAD({
-    startOnLoad: false, // do not activate until startSession()
-
-    additionalAudioConstraints: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-
-    onSpeechStart: () => {
-      console.log("SPEECH START FIRED — VAD is detecting voice");
-      console.log("wsRef current:", wsRef.current?.readyState);
-      console.log("sessionActive:", sessionActiveRef.current);
-      if (!sessionActiveRef.current) return;
-
-      // If AI is mid-speech, interrupt it
-      if (isSpeakingRef.current) {
-        // Prevent self-interruption from speaker echo or room acoustics in the first 1200ms of AI speech
-        if (Date.now() - speechStartTimeRef.current < 1200) {
-          console.debug("[VAD] Suppressing echo/self-interruption during initial AI playback");
-          return;
-        }
-        stopCurrentAudio();
-        // Send interrupt signal to backend so it cancels Groq/TTS streams
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: "interrupt" }));
-        }
-        setOrbState("listening");
-      } else {
-        setOrbState("listening");
+    // If AI is mid-speech, interrupt it
+    if (isSpeakingRef.current) {
+      // Prevent self-interruption from speaker echo or room acoustics in the first 1200ms of AI speech
+      if (Date.now() - speechStartTimeRef.current < 1200) {
+        console.debug("[VAD] Suppressing echo/self-interruption during initial AI playback");
+        return;
       }
-    },
+      stopCurrentAudio();
+      // Send interrupt signal to backend so it cancels Groq/TTS streams
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "interrupt" }));
+      }
+      setOrbState("listening");
+    } else {
+      setOrbState("listening");
+    }
+  }, [stopCurrentAudio]);
 
-    onSpeechEnd: (audio: Float32Array) => {
-      console.log("SPEECH END FIRED — audio length:", audio.length);
-      console.log("wsRef readyState:", wsRef.current?.readyState);
-      if (!sessionActiveRef.current) return;
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+  const handleSpeechEnd = useCallback((audio: Float32Array) => {
+    console.log("SPEECH END FIRED — audio length:", audio.length);
+    console.log("wsRef readyState:", wsRef.current?.readyState);
+    if (!sessionActiveRef.current) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-      // VAD gives Float32 @ 16000Hz — convert to Int16 for Deepgram linear16
-      const int16 = float32ToInt16(audio);
-      wsRef.current.send(int16.buffer);
-    },
-
-    onVADMisfire: () => {
-      console.log("VAD MISFIRE — speech too short, discarded");
-    },
-
-    // Static asset paths — files must exist in /public
-    modelURL: "/silero_vad_v5.onnx",
-    workletURL: "/vad.worklet.bundle.min.js",
-    model: "v5",
-    baseAssetPath: "/",
-    onnxWASMBasePath: "/",
-    ortConfig: (ort: any) => {
-      ort.env.wasm.wasmPaths = "/";
-      ort.env.wasm.numThreads = 1;
-    },
-
-    // Tuned for low-latency conversational turnarounds (< 2 seconds)
-    positiveSpeechThreshold: 0.4,
-    negativeSpeechThreshold: 0.25, // ~0.15 lower than positive
-    minSpeechMs: 150,
-    preSpeechPadMs: 200,
-    redemptionMs: 350,
-  } as any);
-  vadRef.current = vad;
+    // VAD gives Float32 @ 16000Hz — convert to Int16 for Deepgram linear16
+    const int16 = float32ToInt16(audio);
+    wsRef.current.send(int16.buffer);
+  }, []);
 
   // ─── Session start ─────────────────────────────────────────────────────
 
@@ -376,7 +424,7 @@ export default function Home() {
 
     try {
       await connectWebSocket();
-      vad.start();
+      vadRef.current?.start();
       setSessionActive(true);
       setOrbState("listening");
     } catch (err) {
@@ -391,18 +439,12 @@ export default function Home() {
     } finally {
       setIsConnecting(false);
     }
-  }, [connectWebSocket, vad]);
+  }, [connectWebSocket]);
 
   // ─── Session stop ──────────────────────────────────────────────────────
 
   const stopSession = useCallback(() => {
-    try {
-      if (vad && !vad.errored && !vad.loading) {
-        vad.pause();
-      }
-    } catch (e) {
-      console.warn("[VAD] pause ignored:", e);
-    }
+    vadRef.current?.pause();
     stopCurrentAudio();
     wsRef.current?.close();
     wsRef.current = null;
@@ -415,7 +457,7 @@ export default function Home() {
     setAiResponse("");
     setConversationLog([]);
     if (transcriptTimerRef.current) clearTimeout(transcriptTimerRef.current);
-  }, [vad, stopCurrentAudio]);
+  }, [stopCurrentAudio]);
 
   // ─── Cleanup on unmount ────────────────────────────────────────────────
 
@@ -444,7 +486,7 @@ export default function Home() {
     ? (backendState === "SLEEPING" ? IDLE_STATUS_TEXT : "")
     : "";
 
-  const isVADSpeaking = sessionActive && vad.userSpeaking;
+  const isVADSpeaking = sessionActive && userSpeaking;
 
   // ─── Render ───────────────────────────────────────────────────────────
 
@@ -505,14 +547,67 @@ export default function Home() {
             />
             {sessionActive ? "Connected" : "Offline"}
           </div>
-          <Link
-            href="/kitchen"
-            style={{ fontSize: "0.875rem", color: "#a09eb0", textDecoration: "none" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#fff")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#a09eb0")}
-          >
-            Kitchen Display →
-          </Link>
+          {isAuthenticated() ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              {isAdmin() && (
+                <Link
+                  href="/admin"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "0.75rem",
+                    color: "#fbbf24",
+                    textDecoration: "none",
+                    background: "rgba(251, 191, 36, 0.1)",
+                    padding: "6px 12px",
+                    borderRadius: "10px",
+                    border: "1px solid rgba(251, 191, 36, 0.25)",
+                    fontWeight: 600,
+                  }}
+                >
+                  <Shield size={14} />
+                  <span>Admin Panel</span>
+                </Link>
+              )}
+              <button
+                onClick={handleLogout}
+                title="Sign Out"
+                style={{
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "#f87171",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "6px",
+                  borderRadius: "8px",
+                }}
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          ) : (
+            <Link
+              href="/login"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "0.75rem",
+                color: "#f59e0b",
+                textDecoration: "none",
+                background: "rgba(245, 158, 11, 0.15)",
+                padding: "6px 14px",
+                borderRadius: "10px",
+                border: "1px solid rgba(245, 158, 11, 0.3)",
+                fontWeight: 600,
+              }}
+            >
+              <User size={14} />
+              <span>Admin Login</span>
+            </Link>
+          )}
         </div>
       </header>
 
@@ -567,7 +662,14 @@ export default function Home() {
       >
         {/* ── Orb Section ── */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
-          <Orb state={orbState} />
+          <VoiceOrb
+            ref={vadRef}
+            sessionActive={sessionActive}
+            orbState={orbState}
+            onSpeechStart={handleSpeechStart}
+            onSpeechEnd={handleSpeechEnd}
+            onUserSpeakingChange={setUserSpeaking}
+          />
 
           {/* State Badge */}
           <div
@@ -873,22 +975,13 @@ export default function Home() {
 
         {/* Dev link / Receipt button */}
         <div style={{ marginTop: "auto" }}>
-          {orderToken ? (
+          {orderToken && (
             <button
               onClick={() => setShowReceipt(true)}
               className="w-full bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/40 text-emerald-300 py-2.5 px-4 rounded-xl text-sm font-medium transition duration-200 flex items-center justify-center gap-2 mt-4"
             >
               <span>View Confirmed Receipt (#{orderToken})</span>
             </button>
-          ) : (
-            <Link
-              href="/order-summary"
-              style={{ color: "#4b4560", fontSize: "0.75rem", textDecoration: "none" }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#a09eb0")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "#4b4560")}
-            >
-              Dev: Order Summary →
-            </Link>
           )}
         </div>
       </main>
@@ -901,12 +994,7 @@ export default function Home() {
           orderTotal={confirmedTotal}
           restaurantName="Savour Foods"
           onClose={() => {
-            setShowReceipt(false);
-            setOrderToken("");
-            setOrderId("");
-            setConfirmedTotal(0);
-            setConfirmedItems([]);
-            if (vadRef.current) vadRef.current.start();
+            window.location.reload();
           }}
         />
       )}

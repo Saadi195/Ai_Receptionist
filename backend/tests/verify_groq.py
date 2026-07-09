@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from groq import Groq
 
 # Load .env from parent directory or current environment
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"), override=True)
+load_dotenv(override=True)
 
 def verify_groq():
     api_key = os.getenv("GROQ_API_KEY")
