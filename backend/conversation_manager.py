@@ -205,13 +205,14 @@ ORDER CONFIRM STATE:
   Respond: "Theek hai, kya change karna chahenge?"
 - "CONFIRMATION_TIMEOUT" input always triggers session_timeout action.
 
-ORDER CANCELLATION (works in any state except SLEEPING):
-- If customer says "cancel", "cancel sab", "naya order", "sab hatao", "order cancel":
+ENTIRE ORDER CANCELLATION (works in any state except SLEEPING):
+- If customer explicitly asks to cancel the ENTIRE order (e.g., "cancel sab", "sab hatao", "poora order cancel kardo", "naya order", or standalone "cancel order"):
   Clear current_order to empty list
   Set order_total to 0
   Set next_state to "SLEEPING"
   Set action to "order_cancelled"
   Respond: "Order cancel kar diya gaya hai."
+- IMPORTANT: If the customer says "[item name] cancel kardo" or "[item name] cancel" (e.g., "Chicken karahi cancel krdo", "Burger cancel kar do", "ek naan cancel karo"), do NOT cancel the entire order! Follow Rule 11 (ITEM REMOVAL) instead!
 
 MULTI-ITEM RULES:
 10. Customer may name multiple items in one utterance: "ek karahi aur do naan"
@@ -223,10 +224,10 @@ MULTI-ITEM RULES:
     - Never skip an item because it appears later in the utterance.
 
 ORDER MODIFICATION RULES:
-11. "woh wala nahi chahiye" / "remove [item]" / "hatao [item]" / "[item] nahi chahiye" \
-    → Remove that item from current_order. Confirm what was removed. Read back the remaining order.
-12. "change karo [item] ko [new item]" → Replace item in current_order with the new item. Confirm.
-13. "cancel sab" / "sab hatao" / "poora cancel" / "naya order" \
+11. ITEM REMOVAL: "[item] cancel kardo" / "[item] cancel krdo" / "[item] cancel kar do" / "remove [item]" / "hatao [item]" / "[item] nahi chahiye" / "woh wala nahi chahiye" \
+    → Remove ONLY that specific item from current_order. Keep all other items intact! Set action to "none". Confirm which item was removed and read back the remaining order.
+12. ITEM REPLACEMENT: "change karo [item] ko [new item]" / "[item] ki jagah [new item] kardo" → Replace item in current_order with the new item. Confirm.
+13. ENTIRE ORDER CLEARING: "cancel sab" / "sab hatao" / "poora cancel" / "naya order" \
     → Clear entire current_order completely. Set order_total to 0. Transition to TAKING_ORDER. \
     Confirm: "Aap ka poora order cancel ho gaya. Kya naya order dena chahenge?"
 14. After ANY modification: set current_order and order_total correctly in your JSON response, \
@@ -528,8 +529,11 @@ class ConversationManager:
                     "action": "none",
                 }
 
-        user_lower = user_input_clean.lower()
-        if any(cmd in user_lower for cmd in ["cancel sab", "sab hatao", "poora cancel", "naya order", "cancel order", "order cancel", "cancel kardo", "cancel kar do"]) or (user_lower == "cancel" and self.state != "SLEEPING"):
+        user_lower = user_input_clean.strip().lower()
+        # Only cancel the entire order explicitly if the user says "cancel sab", "poora cancel", "naya order", "sab hatao"
+        # OR if they say a standalone general cancel phrase without naming a menu item.
+        standalone_cancel_phrases = ["cancel", "cancel order", "order cancel", "cancel kardo", "cancel kar do", "cancel krdo", "order cancel kardo", "order cancel krdo", "order cancel kar do", "poora order cancel"]
+        if any(cmd in user_lower for cmd in ["cancel sab", "sab hatao", "poora cancel", "naya order"]) or (user_lower in standalone_cancel_phrases and self.state != "SLEEPING"):
             self.current_order = []
             self.order_total = 0
             self.state = "SLEEPING"
